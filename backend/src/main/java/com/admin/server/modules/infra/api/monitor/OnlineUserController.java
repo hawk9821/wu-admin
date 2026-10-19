@@ -1,5 +1,6 @@
 package com.admin.server.modules.infra.api.monitor;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.framework.export.ExportFormat;
 import com.admin.server.framework.export.ExportScope;
@@ -9,7 +10,6 @@ import com.admin.server.modules.infra.service.export.ListExportService;
 import com.admin.server.modules.infra.service.monitor.OnlineUserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.annotation.Resource;
@@ -29,7 +29,7 @@ public class OnlineUserController {
 
     @Operation(summary = "在线用户列表")
     @GetMapping("/list")
-    @PreAuthorize("@ss.hasPermission('monitor:online:list')")
+    @RequirePermission("monitor:online:list")
     public CommonResult<List<OnlineUserVO>> list() {
         return CommonResult.success(onlineUserService.listOnlineUsers());
     }
@@ -37,7 +37,7 @@ public class OnlineUserController {
     @Log(title = "在线用户", businessType = Log.BusinessType.EXPORT, isSaveResponseData = false)
     @Operation(summary = "导出在线用户")
     @GetMapping("/export")
-    @PreAuthorize("@ss.hasPermission('monitor:online:list')")
+    @RequirePermission("monitor:online:list")
     public void export(HttpServletResponse response,
                        @RequestParam(defaultValue = "xlsx") String format,
                        @RequestParam(defaultValue = "filtered") String scope,
@@ -49,7 +49,7 @@ public class OnlineUserController {
 
     @Operation(summary = "强退用户")
     @DeleteMapping("/{userId}")
-    @PreAuthorize("@ss.hasPermission('monitor:online:forceLogout')")
+    @RequirePermission("monitor:online:forceLogout")
     public CommonResult<Boolean> forceLogout(@PathVariable Long userId) {
         onlineUserService.forceLogout(userId);
         return CommonResult.success(true);

@@ -34,6 +34,9 @@ public class EmailCodeService {
     @Resource
     private EmailLogService emailLogService;
 
+    @Resource
+    private com.admin.server.framework.security.core.service.VerificationCodeGuard verificationCodeGuard;
+
     /**
      * 发送邮箱验证码（默认绑定场景）
      */
@@ -79,6 +82,7 @@ public class EmailCodeService {
         // 存储验证码
         RBucket<String> codeBucket = redissonClient.getBucket(EMAIL_CODE_KEY + email);
         codeBucket.set(code, Duration.ofMinutes(expireMin));
+        verificationCodeGuard.clear("email", email);
 
         // 设置频率锁与每日计数
         limitBucket.set("1", Duration.ofSeconds(intervalSec));
@@ -204,15 +208,22 @@ public class EmailCodeService {
         if (StrUtil.isBlank(email) || StrUtil.isBlank(code)) {
             return "邮箱和验证码不能为空";
         }
-        RBucket<String> codeBucket = redissonClient.getBucket(EMAIL_CODE_KEY + email.trim());
+        String normalizedEmail = email.trim();
+        String guardErr = verificationCodeGuard.check("email", normalizedEmail);
+        if (guardErr != null) {
+            return guardErr;
+        }
+        RBucket<String> codeBucket = redissonClient.getBucket(EMAIL_CODE_KEY + normalizedEmail);
         String savedCode = codeBucket.get();
         if (savedCode == null) {
             return "验证码已过期或不存在，请重新获取";
         }
         if (!savedCode.equalsIgnoreCase(code.trim())) {
-            return "验证码错误";
+            String recordErr = verificationCodeGuard.recordFailure("email", normalizedEmail);
+            return recordErr != null ? recordErr : "验证码错误";
         }
         codeBucket.delete();
+        verificationCodeGuard.clear("email", normalizedEmail);
         return null;
     }
 

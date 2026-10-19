@@ -1,5 +1,6 @@
 package com.admin.server.modules.infra.api.export;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.framework.export.ExportFormat;
 import com.admin.server.framework.export.ExportScope;
 import com.admin.server.framework.log.annotation.Log;
@@ -8,7 +9,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -27,7 +27,7 @@ public class DataExportController {
     @Log(title = "用户管理", businessType = Log.BusinessType.EXPORT, isSaveResponseData = false)
     @Operation(summary = "导出用户列表")
     @GetMapping("/user")
-    @PreAuthorize("@ss.hasRead('system:user:list')")
+    @RequirePermission(value = "system:user:list", type = RequirePermission.Type.READ)
     public void exportUser(HttpServletResponse response,
                            @RequestParam(defaultValue = "xlsx") String format,
                            @RequestParam(defaultValue = "filtered") String scope,
@@ -45,7 +45,7 @@ public class DataExportController {
     @Log(title = "登录日志", businessType = Log.BusinessType.EXPORT, isSaveResponseData = false)
     @Operation(summary = "导出登录日志")
     @GetMapping("/login-log")
-    @PreAuthorize("@ss.hasPermission('system:loginLog:query')")
+    @RequirePermission("system:loginLog:query")
     public void exportLoginLog(HttpServletResponse response,
                                @RequestParam(defaultValue = "xlsx") String format,
                                @RequestParam(defaultValue = "filtered") String scope,
@@ -61,7 +61,7 @@ public class DataExportController {
     @Log(title = "操作日志", businessType = Log.BusinessType.EXPORT, isSaveResponseData = false)
     @Operation(summary = "导出操作日志")
     @GetMapping("/oper-log")
-    @PreAuthorize("@ss.hasPermission('system:operLog:query')")
+    @RequirePermission("system:operLog:query")
     public void exportOperLog(HttpServletResponse response,
                               @RequestParam(defaultValue = "xlsx") String format,
                               @RequestParam(defaultValue = "filtered") String scope,
@@ -77,7 +77,7 @@ public class DataExportController {
     @Log(title = "工单管理", businessType = Log.BusinessType.EXPORT, isSaveResponseData = false)
     @Operation(summary = "导出工单列表")
     @GetMapping("/ticket")
-    @PreAuthorize("@ss.hasRead('system:ticket:list')")
+    @RequirePermission(value = "system:ticket:list", type = RequirePermission.Type.READ)
     public void exportTicket(HttpServletResponse response,
                              @RequestParam(defaultValue = "xlsx") String format,
                              @RequestParam(defaultValue = "filtered") String scope,
@@ -94,7 +94,7 @@ public class DataExportController {
     @Log(title = "审批单中心", businessType = Log.BusinessType.EXPORT, isSaveResponseData = false)
     @Operation(summary = "导出审批单列表")
     @GetMapping("/approval")
-    @PreAuthorize("@ss.hasRead('system:approval:list')")
+    @RequirePermission(value = "system:approval:list", type = RequirePermission.Type.READ)
     public void exportApproval(HttpServletResponse response,
                                @RequestParam(defaultValue = "xlsx") String format,
                                @RequestParam(defaultValue = "filtered") String scope,

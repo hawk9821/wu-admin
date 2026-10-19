@@ -22,12 +22,25 @@ public interface DeptMapper extends BaseMapper<DeptDO> {
             "<if test='status != null'>",
             "  AND status = #{status}",
             "</if>",
+            "<if test='deptIds != null'>",
+            "  <choose>",
+            "    <when test='deptIds.size() > 0'>",
+            "      AND id IN",
+            "      <foreach collection='deptIds' item='visibleDeptId' open='(' separator=',' close=')'>#{visibleDeptId}</foreach>",
+            "    </when>",
+            "    <otherwise>AND 1 = 0</otherwise>",
+            "  </choose>",
+            "</if>",
             "ORDER BY update_time DESC",
             "</script>"
     })
     IPage<DeptDO> selectDeletedPage(Page<DeptDO> page,
                                     @Param("name") String name,
-                                    @Param("status") Integer status);
+                                    @Param("status") Integer status,
+                                    @Param("deptIds") java.util.List<Long> deptIds);
+
+    @Select("SELECT * FROM sys_dept WHERE id = #{id} AND deleted = 1")
+    DeptDO selectDeletedById(@Param("id") Long id);
 
     @Update("UPDATE sys_dept SET deleted = 0, update_time = NOW() WHERE id = #{id} AND deleted = 1")
     int restoreById(@Param("id") Long id);

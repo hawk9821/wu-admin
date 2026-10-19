@@ -17,6 +17,7 @@ public class SysFileDO implements Serializable {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+    private Long deptId;
     private String originalName;
     private String fileName;
     private String filePath;

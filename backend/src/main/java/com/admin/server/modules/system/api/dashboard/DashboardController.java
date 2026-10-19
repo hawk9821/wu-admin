@@ -1,12 +1,12 @@
 package com.admin.server.modules.system.api.dashboard;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.modules.system.service.dashboard.vo.RecentLoginVO;
 import com.admin.server.modules.system.service.dashboard.DashboardService;
 import cn.dev33.satoken.stp.StpUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,7 +25,7 @@ public class DashboardController {
 
     @Operation(summary = "工作台统计数据")
     @GetMapping("/stats")
-    @PreAuthorize("@ss.hasRead('dashboard:stats:view')")
+    @RequirePermission(value = "dashboard:stats:view", type = RequirePermission.Type.READ)
     public CommonResult<Map<String, Object>> getStats() {
         Long loginUserId = StpUtil.isLogin() ? StpUtil.getLoginIdAsLong() : null;
         return CommonResult.success(dashboardService.getStats(loginUserId));
@@ -33,14 +33,14 @@ public class DashboardController {
 
     @Operation(summary = "最近登录记录")
     @GetMapping("/recent-logins")
-    @PreAuthorize("@ss.hasRead('dashboard:stats:view')")
+    @RequirePermission(value = "dashboard:stats:view", type = RequirePermission.Type.READ)
     public CommonResult<List<RecentLoginVO>> recentLogins() {
         return CommonResult.success(dashboardService.getRecentLogins());
     }
 
     @Operation(summary = "记录工作台访问")
     @GetMapping("/visit")
-    @PreAuthorize("@ss.hasRead('dashboard:stats:view')")
+    @RequirePermission(value = "dashboard:stats:view", type = RequirePermission.Type.READ)
     public CommonResult<Void> recordVisit() {
         Long loginUserId = StpUtil.isLogin() ? StpUtil.getLoginIdAsLong() : null;
         dashboardService.recordVisit(loginUserId);

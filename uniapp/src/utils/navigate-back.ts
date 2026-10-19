@@ -131,6 +131,8 @@ export function resolveFallbackForRoute(route: string): string {
     'pages-sub/system/ticket/create': '/pages-sub/system/ticket/index',
     'pages-sub/system/approval/create': '/pages-sub/system/approval/index',
     'pages-sub/system/file/preview': '/pages-sub/system/file/index',
+    'pages-sub/system/security/index': '/pages/work/index',
+    'pages-sub/ai/knowledge/edit': '/pages-sub/ai/knowledge/index',
     'pages-sub/system/user/detail': '/pages-sub/system/user/index',
     'pages-sub/system/user/index': '/pages/work/index',
     'pages-sub/mine/mobile-bind': '/pages-sub/mine/profile',

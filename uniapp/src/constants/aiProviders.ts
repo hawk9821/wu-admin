@@ -15,7 +15,7 @@ export const AI_PROVIDER_META: Record<string, AiProviderMeta> = {
     color: '#4d6bfe',
     bg: 'rgba(77, 107, 254, 0.12)',
     baseUrl: 'https://api.deepseek.com/v1',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    models: ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash'],
   },
   openai: {
     label: 'OpenAI',
@@ -23,7 +23,7 @@ export const AI_PROVIDER_META: Record<string, AiProviderMeta> = {
     color: '#10a37f',
     bg: 'rgba(16, 163, 127, 0.12)',
     baseUrl: 'https://api.openai.com/v1',
-    models: ['gpt-4o', 'gpt-4o-mini'],
+    models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'o1', 'o1-mini'],
   },
   qwen: {
     label: '通义千问',
@@ -31,7 +31,7 @@ export const AI_PROVIDER_META: Record<string, AiProviderMeta> = {
     color: '#615ced',
     bg: 'rgba(97, 92, 237, 0.12)',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    models: ['qwen3.7-plus', 'qwen3.7-max', 'qwen3.6-plus'],
+    models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-long'],
   },
   kimi: {
     label: 'Kimi',
@@ -39,7 +39,7 @@ export const AI_PROVIDER_META: Record<string, AiProviderMeta> = {
     color: '#0f172a',
     bg: 'rgba(15, 23, 42, 0.08)',
     baseUrl: 'https://api.moonshot.cn/v1',
-    models: ['kimi-k2.7-code', 'kimi-k2.6'],
+    models: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6'],
   },
 }
 

@@ -64,7 +64,7 @@ public class SysJobServiceImpl extends ServiceImpl<SysJobMapper, SysJobDO> imple
     public List<JobTemplateVO> templates() {
         List<JobTemplateVO> list = new ArrayList<>();
         list.add(template("purge_logs", "过期日志归档", "SYSTEM", "清理超保留期的操作/登录/API 访问日志",
-                "systemJobTask.purgeExpiredLogs", "0 30 2 * * ?", "系统日志", "Document"));
+                "systemJobTask.purgeExpiredLogs", "0 30 2 * * ?", "系统日志", "DocumentRemove"));
         list.add(template("purge_chat", "私聊消息清理", "SYSTEM", "清理超过 180 天的私聊记录，防止 sys_chat_message 膨胀",
                 "systemJobTask.purgeOldChatMessages", "0 0 3 * * ?", "消息聊天", "ChatDotRound"));
         list.add(template("purge_group_chat", "群聊消息清理", "SYSTEM", "清理超过 180 天的群聊记录，防止 sys_chat_group_message 膨胀",
@@ -76,7 +76,7 @@ public class SysJobServiceImpl extends ServiceImpl<SysJobMapper, SysJobDO> imple
         list.add(template("purge_ticket_recycle", "工单回收站清理", "SYSTEM", "彻底删除回收站中超过 30 天的工单及关联数据",
                 "systemJobTask.purgeTicketRecycleBin", "0 30 3 * * ?", "工单管理", "Tickets"));
         list.add(template("purge_file_recycle", "文件回收站清理", "SYSTEM", "彻底删除回收站中超过 30 天的文件记录及磁盘文件",
-                "systemJobTask.purgeFileRecycleBin", "0 45 3 * * ?", "文件管理", "Folder"));
+                "systemJobTask.purgeFileRecycleBin", "0 45 3 * * ?", "文件管理", "FolderDelete"));
         return list;
     }
 

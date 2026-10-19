@@ -43,15 +43,19 @@ export const useSiteStore = defineStore('site', () => {
         disableDevtool.value = data?.security?.disableDevtool === true
         aiAssistantEnabled.value = data?.ai?.assistantEnabled !== false
 
-        // 从公开配置获取「签名/加密是否开启」标志，但未登录前暂不下发密钥
+        // 从公开配置获取「签名/加密是否开启」标志与 SM2 公钥
         const sm3SignEnabled = data?.security?.sm3SignEnabled === true
         const sm4EncryptEnabled = data?.security?.sm4EncryptEnabled === true
+        const sm2EncryptEnabled = data?.security?.sm2EncryptEnabled !== false
+        const sm2PublicKey = data?.security?.sm2PublicKey || ''
 
-        // 先将开关状态写入内存（密钥字段暂空，待登录后自动下发）
+        // 先将开关状态与 SM2 公钥写入内存（SM4/SM3会话密钥字段暂空，待登录后自动下发）
         setSecurityConfig({
           sm4EncryptEnabled,
           sm3SignEnabled,
           sm2SignEnabled: sm3SignEnabled,
+          sm2EncryptEnabled,
+          sm2PublicKey,
         })
       } catch {
         disableDevtool.value = false

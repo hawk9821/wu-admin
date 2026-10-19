@@ -1,5 +1,6 @@
 package com.admin.server.modules.message.api;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
@@ -16,7 +17,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import com.admin.server.framework.log.annotation.Log;
@@ -36,7 +36,7 @@ public class AnnounceController {
     private ObjectMapper objectMapper;
 
     @GetMapping("/page")
-    @PreAuthorize("@ss.hasRead('system:announce:list')")
+    @RequirePermission(value = "system:announce:list", type = RequirePermission.Type.READ)
     @Operation(summary = "通知分页")
     public CommonResult<PageResult<AnnounceDO>> page(PageParam pageParam,
             @RequestParam(required = false) String title,
@@ -58,7 +58,7 @@ public class AnnounceController {
 
     @GetMapping("/{id}")
     @Operation(summary = "通知详情")
-    @PreAuthorize("isAuthenticated()")
+    @RequirePermission(type = RequirePermission.Type.LOGIN)
     public CommonResult<AnnounceRequest> detail(@PathVariable Long id) {
         // 可见性由 service 判定：通知管理/发布人可看草稿，其余用户仅可见「已发布且已投递给自己」的通知
         AnnounceDO entity = announceService.getVisibleById(id, SecurityUtils.getLoginUserIdOrZero());
@@ -70,7 +70,7 @@ public class AnnounceController {
     }
 
     @PostMapping
-    @PreAuthorize("@ss.hasPermission('system:announce:create')")
+    @RequirePermission("system:announce:create")
     @Operation(summary = "新增通知")
     @Log(title = "通知公告", businessType = Log.BusinessType.INSERT)
     public CommonResult<Boolean> create(@RequestBody AnnounceRequest req) {
@@ -79,7 +79,7 @@ public class AnnounceController {
     }
 
     @PutMapping
-    @PreAuthorize("@ss.hasPermission('system:announce:update')")
+    @RequirePermission("system:announce:update")
     @Operation(summary = "修改通知")
     @Log(title = "通知公告", businessType = Log.BusinessType.UPDATE)
     public CommonResult<Boolean> update(@RequestBody AnnounceRequest req) {
@@ -88,7 +88,7 @@ public class AnnounceController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("@ss.hasPermission('system:announce:delete')")
+    @RequirePermission("system:announce:delete")
     @Operation(summary = "删除通知")
     @Log(title = "通知公告", businessType = Log.BusinessType.DELETE)
     public CommonResult<Boolean> delete(@PathVariable Long id) {
@@ -97,7 +97,7 @@ public class AnnounceController {
     }
 
     @PostMapping("/{id}/publish")
-    @PreAuthorize("@ss.hasPermission('system:announce:publish')")
+    @RequirePermission("system:announce:publish")
     @Operation(summary = "发布通知")
     @Log(title = "通知公告", businessType = Log.BusinessType.OTHER)
     public CommonResult<Boolean> publish(@PathVariable Long id) {
@@ -126,14 +126,14 @@ public class AnnounceController {
     }
 
     @GetMapping("/{id}/send-logs")
-    @PreAuthorize("@ss.hasRead('system:announce:list')")
+    @RequirePermission(value = "system:announce:list", type = RequirePermission.Type.READ)
     @Operation(summary = "发送日志")
     public CommonResult<List<AnnounceSendLogDO>> sendLogs(@PathVariable Long id) {
         return CommonResult.success(announceService.sendLogs(id, SecurityUtils.getLoginUserIdOrZero()));
     }
 
     @GetMapping("/recycle/page")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     @Operation(summary = "回收站分页")
     public CommonResult<PageResult<AnnounceDO>> recyclePage(PageParam pageParam,
             @RequestParam(required = false) String title) {
@@ -141,7 +141,7 @@ public class AnnounceController {
     }
 
     @PutMapping("/restore")
-    @PreAuthorize("@ss.hasRecycleRestore('system:announce:delete')")
+    @RequirePermission(value = "system:announce:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     @Operation(summary = "恢复通知")
     @Log(title = "通知公告", businessType = Log.BusinessType.OTHER)
     public CommonResult<Boolean> restore(@RequestParam Long id) {
@@ -150,7 +150,7 @@ public class AnnounceController {
     }
 
     @DeleteMapping("/delete-permanent")
-    @PreAuthorize("@ss.hasRecycleDelete('system:announce:delete')")
+    @RequirePermission(value = "system:announce:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     @Operation(summary = "彻底删除")
     @Log(title = "通知公告", businessType = Log.BusinessType.DELETE)
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {

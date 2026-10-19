@@ -8,7 +8,7 @@ import com.admin.server.modules.system.service.${businessName}.${className}Servi
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.access.prepost.PreAuthorize;
+import com.admin.server.framework.security.api.RequirePermission;
 import org.springframework.web.bind.annotation.*;
 
 @Tag(name = "${functionName}")
@@ -21,7 +21,7 @@ public class ${className}Controller {
 
     @GetMapping("/page")
     @Operation(summary = "${functionName}分页")
-    @PreAuthorize("@ss.hasRead('${permPrefix}:list')")
+    @RequirePermission(value = "${permPrefix}:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<${className}DO>> page(
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "10") Integer pageSize#foreach($column in $columns)#if($column.isQuery == 1),
@@ -31,14 +31,14 @@ public class ${className}Controller {
 
     @GetMapping("/{id}")
     @Operation(summary = "${functionName}详情")
-    @PreAuthorize("@ss.hasRead('${permPrefix}:list')")
+    @RequirePermission(value = "${permPrefix}:list", type = RequirePermission.Type.READ)
     public CommonResult<${className}DO> detail(@PathVariable ${pkColumn.javaType} id) {
         return CommonResult.success(${classname}Service.getById(id));
     }
 
     @PostMapping
     @Operation(summary = "新增${functionName}")
-    @PreAuthorize("@ss.hasPermission('${permPrefix}:create')")
+    @RequirePermission("${permPrefix}:create")
     @Log(title = "${functionName}", businessType = Log.BusinessType.INSERT)
     public CommonResult<Boolean> create(@RequestBody ${className}DO entity) {
         ${classname}Service.create(entity);
@@ -47,7 +47,7 @@ public class ${className}Controller {
 
     @PutMapping
     @Operation(summary = "修改${functionName}")
-    @PreAuthorize("@ss.hasPermission('${permPrefix}:update')")
+    @RequirePermission("${permPrefix}:update")
     @Log(title = "${functionName}", businessType = Log.BusinessType.UPDATE)
     public CommonResult<Boolean> update(@RequestBody ${className}DO entity) {
         ${classname}Service.update(entity);
@@ -56,7 +56,7 @@ public class ${className}Controller {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除${functionName}")
-    @PreAuthorize("@ss.hasPermission('${permPrefix}:delete')")
+    @RequirePermission("${permPrefix}:delete")
     @Log(title = "${functionName}", businessType = Log.BusinessType.DELETE)
     public CommonResult<Boolean> delete(@PathVariable ${pkColumn.javaType} id) {
         ${classname}Service.delete(id);

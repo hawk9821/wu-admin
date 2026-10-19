@@ -132,8 +132,9 @@ export function addGroupMembers(groupId: number, userIds: number[]) {
   return post(`/system/chat/group/${groupId}/members`, { userIds })
 }
 
-export function getChatGroups() {
-  return get<ChatGroup[]>('/system/chat/group/list')
+/** 群列表；无企业 IM 权限的后台预热场景可传 silent403，避免弹出权限提示 */
+export function getChatGroups(config?: { silent403?: boolean }) {
+  return get<ChatGroup[]>('/system/chat/group/list', undefined, config)
 }
 
 export function getChatHistory(targetId: number, params?: PageQuery) {

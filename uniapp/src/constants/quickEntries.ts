@@ -143,6 +143,15 @@ export const mobileQuickEntries: QuickEntry[] = [
     path: '/pages-sub/ai/log/index',
   },
   {
+    key: 'ai-knowledge',
+    name: 'AI 知识库',
+    desc: '知识条目维护',
+    permission: 'system:ai-knowledge:list',
+    icon: 'notes-o',
+    theme: 'ai',
+    path: '/pages-sub/ai/knowledge/index',
+  },
+  {
     key: 'online',
     name: '在线用户',
     desc: '会话强退',
@@ -205,6 +214,15 @@ export const mobileQuickEntries: QuickEntry[] = [
     theme: 'log',
     path: '/pages-sub/log/login-log',
   },
+  {
+    key: 'security',
+    name: '安全风控',
+    desc: '拦截与封禁',
+    permission: 'system:security:list',
+    icon: 'shield-o',
+    theme: 'log',
+    path: '/pages-sub/system/security/index',
+  },
 ]
 
 export const quickEntryGroups: QuickEntryGroup[] = [
@@ -212,9 +230,9 @@ export const quickEntryGroups: QuickEntryGroup[] = [
   { title: '文件管理', keys: ['file'] },
   { title: '流程中心', keys: ['approval', 'ticket'] },
   { title: '消息协作', keys: ['chat', 'notice'] },
-  { title: 'AI 管理', keys: ['ai-model', 'ai-log'] },
+  { title: 'AI 管理', keys: ['ai-model', 'ai-knowledge', 'ai-log'] },
   { title: '监控运维', keys: ['online', 'server', 'cache', 'job', 'api-access'] },
-  { title: '日志审计', keys: ['oper-log', 'login-log'] },
+  { title: '日志审计', keys: ['security', 'oper-log', 'login-log'] },
 ]
 
 export const entryMap = Object.fromEntries(mobileQuickEntries.map((e) => [e.key, e])) as Record<

@@ -15,6 +15,9 @@ public interface SysFileService extends IService<SysFileDO> {
 
     SysFileDO upload(MultipartFile file, String path, Long groupId);
 
+    /** 按 ID 获取文件并校验当前用户的数据范围；无权限时抛 403 */
+    SysFileDO getAccessibleById(Long id);
+
     SysFileDO uploadImage(MultipartFile file);
 
     SysFileDO uploadChatImage(MultipartFile file);

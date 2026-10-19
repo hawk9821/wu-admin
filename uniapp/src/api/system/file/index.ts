@@ -1,4 +1,4 @@
-import { get, del, put } from '@/utils/request'
+import { get, post, del, put } from '@/utils/request'
 import { uploadFile as uniUpload } from '@/utils/upload'
 import { getToken } from '@/utils/auth'
 import type { PageResult } from '@/types/api'
@@ -10,11 +10,34 @@ export interface FileRecord {
   name?: string
   originalName?: string
   url?: string
+  filePath?: string
+  bucketName?: string
   fileType?: string
   size?: number
   fileSize?: number
   fileSuffix?: string
+  storageType?: string
+  groupId?: number
   createTime?: string
+}
+
+export interface FileGroupVO {
+  id: number
+  name: string
+  sort?: number
+  fileCount?: number
+  createTime?: string
+  updateTime?: string
+}
+
+export interface FileGroupListResult {
+  groups: FileGroupVO[]
+  ungroupedCount: number
+}
+
+export interface FileGroupSaveDTO {
+  id?: number
+  name: string
 }
 
 /** 移动端 img/video 须通过 query 携带 Token */
@@ -89,8 +112,24 @@ export function getDownloadApiUrl(id: number) {
   return withTokenQuery(toAbsoluteApiUrl(`/api/system/file/download/${id}`))
 }
 
+/** 根据记录中的 bucket + objectKey 生成稳定的后端代理地址，兼容切换存储引擎前的旧记录 */
+function buildStorageProxyUrl(file: FileRecord): string {
+  if (!file.filePath || !file.bucketName) return ''
+  const key = file.filePath
+    .replace(/^\/+/, '')
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/')
+  return toAbsoluteApiUrl(`/api/storage/files/${encodeURIComponent(file.bucketName)}/${key}`)
+}
+
 /** 流式预览 URL（对齐 PC getStreamPreviewUrl） */
 export function getStreamPreviewUrl(file: FileRecord): string {
+  if (!file) return ''
+  const proxy = buildStorageProxyUrl(file)
+  if (proxy) {
+    return withTokenQuery(proxy)
+  }
   const type = file.fileType || ''
   if (file.url) {
     const direct = fileDisplayUrl(file.url)
@@ -104,6 +143,29 @@ export function getStreamPreviewUrl(file: FileRecord): string {
 
 export function getFileText(id: number) {
   return get<string>(`/system/file/text/${id}`)
+}
+
+/** 文件分组列表（包含未分组数量），fileCategory 可选 */
+export function getFileGroupList(fileCategory?: string) {
+  return get<FileGroupListResult>(
+    '/system/file-group/list',
+    fileCategory ? { fileCategory } : undefined,
+  )
+}
+
+/** 新增文件分组 */
+export function createFileGroup(data: FileGroupSaveDTO) {
+  return post<boolean>('/system/file-group', data)
+}
+
+/** 编辑文件分组 */
+export function updateFileGroup(data: FileGroupSaveDTO) {
+  return put<boolean>('/system/file-group', data)
+}
+
+/** 删除文件分组（组内文件回到未分组） */
+export function deleteFileGroup(id: number) {
+  return del<boolean>(`/system/file-group/${id}`)
 }
 
 export function pageFileByGroup(params: FilePageQuery) {
@@ -120,6 +182,21 @@ export function uploadSysFile(filePath: string, groupId?: number) {
 
 export function deleteFile(id: number) {
   return del(`/system/file/${id}`)
+}
+
+/** 批量删除文件 */
+export function deleteFileBatch(ids: number[]) {
+  return del<boolean>('/system/file/batch', { data: ids })
+}
+
+/** 批量移动文件到指定分组；groupId 为 null 表示移动到未分组 */
+export function moveFiles(fileIds: number[], groupId: number | null) {
+  return post<boolean>('/system/file/move', { fileIds, groupId })
+}
+
+/** 重命名文件（newName 为完整文件名） */
+export function renameFile(id: number, newName: string) {
+  return put<boolean>(`/system/file/${id}/rename`, { newName })
 }
 
 export function getRecycleFilePage(params: { pageNo?: number; pageSize?: number; originalName?: string }) {

@@ -2,6 +2,9 @@ import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import {
   getConfigGroup,
   updateConfigGroup,
+  getStorageConfig,
+  updateStorageConfig,
+  testStorageConfig,
   testSms,
   testEmail,
   testPayment,
@@ -27,6 +30,9 @@ import type {
   SmsAdminConfig,
   SmsLogRecord,
   EmailLogRecord,
+  StorageConfigDTO,
+  StorageConfigVO,
+  StorageEngineType,
   ThirdPartyConfig,
 } from '@/types/config-types'
 import type { RoleVO } from '@/types/system'
@@ -48,7 +54,18 @@ const SITE_DEFAULTS: SiteAdminConfig = {
 }
 
 const SESSION_DEFAULTS: SessionAdminConfig = { tokenExpireHours: 24, sessionSignExpireHours: 24 }
-const SECURITY_DEFAULTS: SecurityAdminConfig = { disableDevtool: false, isConcurrent: false }
+const SECURITY_DEFAULTS: SecurityAdminConfig = {
+  disableDevtool: false,
+  isConcurrent: false,
+  sm2EncryptEnabled: true,
+  sm4EncryptEnabled: true,
+  sm2SignEnabled: true,
+  sm3SignEnabled: true,
+  timestampEnabled: true,
+  nonceEnabled: true,
+  riskBlockScore: 80,
+  riskBanScore: 120,
+}
 const LOGIN_DEFAULTS: LoginAdminConfig = {
   captchaEnabled: true,
   captchaType: 'image',
@@ -106,9 +123,56 @@ const EMAIL_DEFAULTS: EmailAdminConfig = {
   sendIntervalSeconds: 60,
 }
 const FILE_DEFAULTS: FileStorageConfig = {
+  type: 'local',
+  localPath: './data/uploads',
+  localDomain: '',
+  minioDomain: '',
+  minioEndpoint: 'http://127.0.0.1:9000',
+  minioAccessKey: '',
+  minioBucket: 'wu-admin',
+  cosRegion: 'ap-guangzhou',
+  cosBucket: '',
+  cosSecretId: '',
+  cosDomain: '',
+  ossEndpoint: 'oss-cn-hangzhou.aliyuncs.com',
+  ossBucket: '',
+  ossAccessKeyId: '',
+  ossDomain: '',
   maxSizeMb: 50,
   allowedExtensions:
     'jpg,jpeg,png,gif,webp,bmp,svg,pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,json,xml,zip,rar,mp4,mp3,wav,avi,mov',
+}
+const STORAGE_FORM_DEFAULTS: StorageConfigVO & {
+  minioSecretKey?: string
+  cosSecretKey?: string
+  ossAccessKeySecret?: string
+} = {
+  type: 'local',
+  localPath: './data/uploads',
+  localDomain: '',
+  minioDomain: '',
+  minioEndpoint: 'http://127.0.0.1:9000',
+  minioAccessKey: '',
+  minioSecretKey: '',
+  minioBucket: 'wu-admin',
+  minioSecretKeyConfigured: false,
+  cosRegion: 'ap-guangzhou',
+  cosBucket: '',
+  cosSecretId: '',
+  cosSecretKey: '',
+  cosDomain: '',
+  cosSecretKeyConfigured: false,
+  ossEndpoint: 'oss-cn-hangzhou.aliyuncs.com',
+  ossBucket: '',
+  ossAccessKeyId: '',
+  ossAccessKeySecret: '',
+  ossDomain: '',
+  ossAccessKeySecretConfigured: false,
+  maxSizeMb: 50,
+  allowedExtensions: FILE_DEFAULTS.allowedExtensions,
+  activeType: 'local',
+  activeBucket: '',
+  healthy: true,
 }
 const RATE_DEFAULTS: RateLimitConfig = {
   captchaPerIpMinute: 40,
@@ -119,6 +183,9 @@ const RATE_DEFAULTS: RateLimitConfig = {
   smsPerPhoneDaily: 10,
   smsPerIpDaily: 30,
   aiChatPerUserMinute: 8,
+  apiPerIpMinute: 240,
+  authPerIpMinute: 60,
+  filesPerIpMinute: 600,
 }
 const AI_DEFAULTS: AiAdminConfig = {
   assistantEnabled: true,
@@ -278,6 +345,14 @@ export function useConfigEditor() {
 
   const platformMaxFileMb = 500
 
+  const storageForm = reactive({ ...STORAGE_FORM_DEFAULTS })
+  const storageEngine = ref<StorageEngineType>('local')
+  const storageActiveType = ref<StorageEngineType>('local')
+  const storageHealthy = ref(true)
+  const storageLoading = ref(false)
+  const storageSaving = ref(false)
+  const storageTesting = ref(false)
+
   const siteDraft = reactive<SiteAdminConfig>({ ...SITE_DEFAULTS })
   const sessionDraft = reactive<SessionAdminConfig>({ ...SESSION_DEFAULTS })
   const securityDraft = reactive<SecurityAdminConfig>({ ...SECURITY_DEFAULTS })
@@ -350,6 +425,111 @@ export function useConfigEditor() {
     set: (v: boolean) => { securityDraft.isConcurrent = !v },
   })
 
+  /** 把存储引擎表单同步回 file 配置分组，确保「保存全部」不会丢掉存储配置 */
+  function syncStorageToFileDraft() {
+    fileDraft.type = storageEngine.value
+    fileDraft.localPath = storageForm.localPath
+    fileDraft.localDomain = storageForm.localDomain
+    fileDraft.minioDomain = storageForm.minioDomain
+    fileDraft.minioEndpoint = storageForm.minioEndpoint
+    fileDraft.minioAccessKey = storageForm.minioAccessKey
+    if (storageForm.minioSecretKey) fileDraft.minioSecretKey = storageForm.minioSecretKey
+    fileDraft.minioBucket = storageForm.minioBucket
+    fileDraft.cosRegion = storageForm.cosRegion
+    fileDraft.cosBucket = storageForm.cosBucket
+    fileDraft.cosSecretId = storageForm.cosSecretId
+    if (storageForm.cosSecretKey) fileDraft.cosSecretKey = storageForm.cosSecretKey
+    fileDraft.cosDomain = storageForm.cosDomain
+    fileDraft.ossEndpoint = storageForm.ossEndpoint
+    fileDraft.ossBucket = storageForm.ossBucket
+    fileDraft.ossAccessKeyId = storageForm.ossAccessKeyId
+    if (storageForm.ossAccessKeySecret) fileDraft.ossAccessKeySecret = storageForm.ossAccessKeySecret
+    fileDraft.ossDomain = storageForm.ossDomain
+  }
+
+  function buildStorageDto(): StorageConfigDTO {
+    return {
+      type: storageEngine.value,
+      localPath: storageForm.localPath,
+      localDomain: storageForm.localDomain,
+      minioDomain: storageForm.minioDomain,
+      minioEndpoint: storageForm.minioEndpoint,
+      minioAccessKey: storageForm.minioAccessKey,
+      minioSecretKey: storageForm.minioSecretKey,
+      minioBucket: storageForm.minioBucket,
+      cosRegion: storageForm.cosRegion,
+      cosBucket: storageForm.cosBucket,
+      cosSecretId: storageForm.cosSecretId,
+      cosSecretKey: storageForm.cosSecretKey,
+      cosDomain: storageForm.cosDomain,
+      ossEndpoint: storageForm.ossEndpoint,
+      ossBucket: storageForm.ossBucket,
+      ossAccessKeyId: storageForm.ossAccessKeyId,
+      ossAccessKeySecret: storageForm.ossAccessKeySecret,
+      ossDomain: storageForm.ossDomain,
+      maxSizeMb: fileDraft.maxSizeMb,
+      allowedExtensions: fileDraft.allowedExtensions,
+    }
+  }
+
+  async function loadStorageConfig() {
+    storageLoading.value = true
+    try {
+      const res = await getStorageConfig()
+      const data = res.data
+      if (!data) return
+      Object.assign(storageForm, data)
+      // 后端不会回传密钥明文，留空表示保持原密钥
+      storageForm.minioSecretKey = ''
+      storageForm.cosSecretKey = ''
+      storageForm.ossAccessKeySecret = ''
+      storageEngine.value = data.type || data.activeType || 'local'
+      storageActiveType.value = data.activeType || data.type || 'local'
+      storageHealthy.value = !!data.healthy
+      syncStorageToFileDraft()
+    } catch {
+      /* 全局错误处理已提示 */
+    } finally {
+      storageLoading.value = false
+    }
+  }
+
+  async function testStorageConnection() {
+    storageTesting.value = true
+    try {
+      await testStorageConfig(buildStorageDto())
+      uni.showToast({ title: '连通性测试通过', icon: 'success' })
+      if (storageEngine.value === storageActiveType.value) {
+        storageHealthy.value = true
+      }
+    } catch {
+      if (storageEngine.value === storageActiveType.value) {
+        storageHealthy.value = false
+      }
+    } finally {
+      storageTesting.value = false
+    }
+  }
+
+  async function saveStorageConfig() {
+    storageSaving.value = true
+    try {
+      await updateStorageConfig(buildStorageDto())
+      uni.showToast({ title: '存储引擎已保存并热切换', icon: 'success' })
+      await loadStorageConfig()
+    } catch {
+      /* 全局错误处理已提示 */
+    } finally {
+      storageSaving.value = false
+    }
+  }
+
+  watch(
+    () => ({ ...storageForm, selectedEngine: storageEngine.value }),
+    () => syncStorageToFileDraft(),
+    { deep: true },
+  )
+
   const isDirty = computed(() =>
     GROUP_CODES.some((code) => {
       const normalizedDraft = normalizeGroup(code, clone(drafts[code]))
@@ -396,6 +576,7 @@ export function useConfigEditor() {
         userOptions.value = []
       }
       testSmsTemplate.value = smsDraft.templateVerifyCode || '100001'
+      await loadStorageConfig()
       await loadRecentSmsLogs()
     } finally {
       loading.value = false
@@ -420,6 +601,8 @@ export function useConfigEditor() {
       uni.showToast({ title: '请填写平台名称', icon: 'none' })
       return
     }
+    // 存储表单是独立编辑的，保存前先同步回 file 分组
+    syncStorageToFileDraft()
     if (!isDirty.value) {
       uni.showToast({ title: '暂无修改', icon: 'none' })
       return
@@ -428,6 +611,11 @@ export function useConfigEditor() {
     try {
       for (const code of GROUP_CODES) {
         const payload = normalizeGroup(code, clone(drafts[code]))
+        const savedNormalized = normalizeGroup(code, clone(savedSnapshot[code]))
+        // 只提交真正变化的配置分组，避免未修改的 file 分组被反复写库和做远程连通性测试
+        if (JSON.stringify(payload) === JSON.stringify(savedNormalized)) {
+          continue
+        }
         await updateConfigGroup(code, JSON.stringify(payload))
         Object.assign(drafts[code], payload)
         savedSnapshot[code] = clone(payload)
@@ -442,6 +630,7 @@ export function useConfigEditor() {
     for (const code of GROUP_CODES) {
       Object.assign(drafts[code], clone(savedSnapshot[code]) as object)
     }
+    void loadStorageConfig()
     uni.showToast({ title: '已恢复为上次保存', icon: 'none' })
   }
 
@@ -621,6 +810,13 @@ export function useConfigEditor() {
     testEmailTo,
     paymentTesting,
     platformMaxFileMb,
+    storageForm,
+    storageEngine,
+    storageActiveType,
+    storageHealthy,
+    storageLoading,
+    storageSaving,
+    storageTesting,
     isDirty,
     forbidConcurrentLogin,
     siteDraft,
@@ -663,6 +859,9 @@ export function useConfigEditor() {
     load,
     saveAll,
     resetAll,
+    loadStorageConfig,
+    testStorageConnection,
+    saveStorageConfig,
     saveSite,
     saveSession,
     saveSecurity,

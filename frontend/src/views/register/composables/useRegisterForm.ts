@@ -7,6 +7,8 @@ import type { RegisterForm } from '@/types/api'
 import { getErrorMessage } from '@/utils/axiosError'
 import { sliderVerifyToRequest } from '@/types/slider-captcha'
 import type { SliderVerifyPayload } from '@/types/slider-captcha'
+import { getSecurityConfig } from '@/utils/security-config'
+import { encryptSm2 } from '@/utils/crypto'
 
 type CaptchaMode = 'image' | 'slider'
 
@@ -177,9 +179,13 @@ export function useRegisterForm() {
   async function doRegister(sliderCaptcha?: { uuid: string; code: string }) {
     loading.value = true
     try {
+      const secConfig = getSecurityConfig()
+      const encryptedPassword = secConfig.sm2EncryptEnabled && secConfig.sm2PublicKey
+        ? encryptSm2(formData.password, secConfig.sm2PublicKey)
+        : formData.password
       const registerData: RegisterForm = {
         username: formData.username,
-        password: formData.password,
+        password: encryptedPassword,
         nickname: formData.nickname || undefined,
       }
 

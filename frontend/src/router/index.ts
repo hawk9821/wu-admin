@@ -104,6 +104,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '登录日志', icon: 'Promotion', permission: 'system:loginLog:list' }
       },
       {
+        path: 'system/security-log',
+        name: 'SystemSecurityLog',
+        component: () => import('@/views/system/security-log/index.vue'),
+        meta: { title: '安全风控', icon: 'Lock', permission: 'system:security:list' }
+      },
+      {
         path: 'system/file',
         name: 'SystemFile',
         component: () => import('@/views/system/file/index.vue'),
@@ -125,7 +131,7 @@ const routes: RouteRecordRaw[] = [
         path: 'ai/model',
         name: 'AiModel',
         component: () => import('@/views/ai/model/index.vue'),
-        meta: { title: 'AI 模型配置', icon: 'MagicStick', permission: 'system:ai-model:list' }
+        meta: { title: 'AI 模型配置', icon: 'AiModel', permission: 'system:ai-model:list' }
       },
       {
         path: 'ai/log',
@@ -137,7 +143,7 @@ const routes: RouteRecordRaw[] = [
         path: 'ai/knowledge',
         name: 'AiKnowledge',
         component: () => import('@/views/ai/knowledge/index.vue'),
-        meta: { title: 'AI 知识库', icon: 'Notebook', permission: 'system:ai-knowledge:list' }
+        meta: { title: 'AI 知识库', icon: 'Reading', permission: 'system:ai-knowledge:list' }
       },
       {
         path: 'system/ai-model',

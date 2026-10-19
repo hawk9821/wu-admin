@@ -5,13 +5,13 @@ import com.admin.server.common.exception.BusinessException;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.util.ClientIpUtils;
 import com.admin.server.framework.config.DynamicConfigProvider;
+import com.admin.server.framework.security.api.PermissionDeniedException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -73,9 +73,10 @@ public class GlobalExceptionHandler {
         return CommonResult.error(403, e.getMessage());
     }
 
-    @ExceptionHandler(AccessDeniedException.class)
+    /** 已登录但缺少接口所需权限（原 Spring Security AccessDeniedException 的等价处理） */
+    @ExceptionHandler(PermissionDeniedException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
-    public CommonResult<Void> handleAccessDenied(AccessDeniedException e) {
+    public CommonResult<Void> handleAccessDenied(PermissionDeniedException e) {
         return CommonResult.error(403, "权限不足，无法访问");
     }
 

@@ -3,6 +3,7 @@ package com.admin.server.modules.system.service.loginlog.impl;
 import com.admin.server.modules.system.dal.dataobject.loginlog.LoginLogDO;
 import com.admin.server.modules.system.dal.mysql.loginlog.LoginLogMapper;
 import com.admin.server.modules.system.service.loginlog.LoginLogService;
+import com.admin.server.modules.system.service.permission.DataScopeService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.extern.slf4j.Slf4j;
@@ -18,11 +19,15 @@ public class LoginLogServiceImpl implements LoginLogService {
 
     @Resource
     private LoginLogMapper loginLogMapper;
+    @Resource
+    private DataScopeService dataScopeService;
 
     @Override
     public Page<LoginLogDO> getPage(Integer pageNo, Integer pageSize, String username, String ipaddr, Integer status) {
         Page<LoginLogDO> page = new Page<>(pageNo, pageSize);
         LambdaQueryWrapper<LoginLogDO> wrapper = new LambdaQueryWrapper<>();
+        // 组织隔离：仅展示数据范围内用户的登录日志
+        dataScopeService.applyCreatorScope(wrapper, LoginLogDO::getUserId);
 
         if (StringUtils.hasText(username)) {
             wrapper.like(LoginLogDO::getUsername, username);

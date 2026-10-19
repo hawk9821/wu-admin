@@ -1,5 +1,6 @@
 package com.admin.server.modules.ticket.api.ticket;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
@@ -16,7 +17,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -40,14 +40,14 @@ public class TicketController {
 
     @Operation(summary = "工单处理人选项")
     @GetMapping("/assignee-options")
-    @PreAuthorize("@ss.hasRead('system:ticket:list')")
+    @RequirePermission(value = "system:ticket:list", type = RequirePermission.Type.READ)
     public CommonResult<List<AssigneeOptionVO>> assigneeOptions() {
         return CommonResult.success(ticketService.getAssigneeOptions(SecurityUtils.getLoginUserIdOrZero()));
     }
 
     @Operation(summary = "工单分页")
     @GetMapping("/page")
-    @PreAuthorize("@ss.hasRead('system:ticket:list')")
+    @RequirePermission(value = "system:ticket:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<TicketRespVO>> page(PageParam pageParam,
             @RequestParam(required = false) String title,
             @RequestParam(required = false) String status,
@@ -60,7 +60,7 @@ public class TicketController {
 
     @Operation(summary = "工单详情")
     @GetMapping("/get")
-    @PreAuthorize("@ss.hasRead('system:ticket:list')")
+    @RequirePermission(value = "system:ticket:list", type = RequirePermission.Type.READ)
     public CommonResult<TicketRespVO> get(@RequestParam Long id) {
         TicketDO ticket = ticketService.getDetail(id, SecurityUtils.getLoginUserIdOrZero());
         return CommonResult.success(BeanMappingUtils.copyProperties(ticket, TicketRespVO.class));
@@ -69,7 +69,7 @@ public class TicketController {
     @Log(title = "工单管理", businessType = Log.BusinessType.INSERT)
     @Operation(summary = "创建工单")
     @PostMapping("/create")
-    @PreAuthorize("@ss.hasPermission('system:ticket:create')")
+    @RequirePermission("system:ticket:create")
     public CommonResult<Long> create(@Validated @RequestBody TicketCreateReqVO reqVO) {
         return CommonResult.success(ticketService.create(reqVO, SecurityUtils.getLoginUserIdOrZero()));
     }
@@ -77,7 +77,7 @@ public class TicketController {
     @Log(title = "工单管理", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "更新工单")
     @PutMapping("/update")
-    @PreAuthorize("@ss.hasPermission('system:ticket:update')")
+    @RequirePermission("system:ticket:update")
     public CommonResult<Boolean> update(@Validated @RequestBody TicketUpdateReqVO reqVO) {
         ticketService.update(reqVO, SecurityUtils.getLoginUserIdOrZero());
         return CommonResult.success(true);
@@ -86,7 +86,7 @@ public class TicketController {
     @Log(title = "工单管理", businessType = Log.BusinessType.DELETE)
     @Operation(summary = "删除工单")
     @DeleteMapping("/delete")
-    @PreAuthorize("@ss.hasPermission('system:ticket:delete')")
+    @RequirePermission("system:ticket:delete")
     public CommonResult<Boolean> delete(@RequestParam Long id) {
         ticketService.delete(id, SecurityUtils.getLoginUserIdOrZero());
         return CommonResult.success(true);
@@ -94,7 +94,7 @@ public class TicketController {
 
     @Operation(summary = "回收站分页")
     @GetMapping("/recycle/page")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     public CommonResult<PageResult<TicketRespVO>> recyclePage(PageParam pageParam,
             @RequestParam(required = false) String title,
             @RequestParam(required = false) String status,
@@ -106,7 +106,7 @@ public class TicketController {
     @Log(title = "工单管理", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "恢复工单")
     @PutMapping("/restore")
-    @PreAuthorize("@ss.hasRecycleRestore('system:ticket:delete')")
+    @RequirePermission(value = "system:ticket:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     public CommonResult<Boolean> restore(@RequestParam Long id) {
         ticketService.restore(id);
         return CommonResult.success(true);
@@ -115,7 +115,7 @@ public class TicketController {
     @Log(title = "工单管理", businessType = Log.BusinessType.DELETE)
     @Operation(summary = "彻底删除工单")
     @DeleteMapping("/delete-permanent")
-    @PreAuthorize("@ss.hasRecycleDelete('system:ticket:delete')")
+    @RequirePermission(value = "system:ticket:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {
         ticketService.deletePermanent(id);
         return CommonResult.success(true);
@@ -124,7 +124,7 @@ public class TicketController {
     @Log(title = "工单管理", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "流转工单状态")
     @PutMapping("/transition")
-    @PreAuthorize("@ss.hasRead('system:ticket:list')")
+    @RequirePermission(value = "system:ticket:list", type = RequirePermission.Type.READ)
     public CommonResult<Boolean> transition(@Validated @RequestBody TicketTransitionReqVO reqVO) {
         ticketService.transition(reqVO, SecurityUtils.getLoginUserIdOrZero());
         return CommonResult.success(true);
@@ -132,7 +132,7 @@ public class TicketController {
 
     @Operation(summary = "工单评论列表")
     @GetMapping("/comment/list")
-    @PreAuthorize("@ss.hasRead('system:ticket:list')")
+    @RequirePermission(value = "system:ticket:list", type = RequirePermission.Type.READ)
     public CommonResult<List<TicketCommentDO>> commentList(@RequestParam Long ticketId) {
         return CommonResult.success(ticketService.listComments(ticketId, SecurityUtils.getLoginUserIdOrZero()));
     }
@@ -140,21 +140,21 @@ public class TicketController {
     @Log(title = "工单管理", businessType = Log.BusinessType.INSERT)
     @Operation(summary = "新增工单评论")
     @PostMapping("/comment/create")
-    @PreAuthorize("@ss.hasPermission('system:ticket:comment')")
+    @RequirePermission("system:ticket:comment")
     public CommonResult<Long> createComment(@Validated @RequestBody TicketCommentCreateReqVO reqVO) {
         return CommonResult.success(ticketService.createComment(reqVO, SecurityUtils.getLoginUserIdOrZero()));
     }
 
     @Operation(summary = "工单附件列表")
     @GetMapping("/attachment/list")
-    @PreAuthorize("@ss.hasRead('system:ticket:list')")
+    @RequirePermission(value = "system:ticket:list", type = RequirePermission.Type.READ)
     public CommonResult<List<TicketAttachmentDO>> attachmentList(@RequestParam Long ticketId) {
         return CommonResult.success(ticketService.listAttachments(ticketId, SecurityUtils.getLoginUserIdOrZero()));
     }
 
     @Operation(summary = "上传工单附件")
     @PostMapping(value = "/attachment/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("@ss.hasPermission('system:ticket:comment')")
+    @RequirePermission("system:ticket:comment")
     public CommonResult<Long> uploadAttachment(@RequestParam Long ticketId,
                                                @RequestPart("file") MultipartFile file) throws IOException {
         return CommonResult.success(ticketService.uploadAttachment(ticketId, file, SecurityUtils.getLoginUserIdOrZero()));
@@ -163,7 +163,7 @@ public class TicketController {
     @Operation(summary = "下载工单附件")
     @SuppressWarnings("all")
     @GetMapping("/attachment/download/{id}")
-    @PreAuthorize("@ss.hasRead('system:ticket:list')")
+    @RequirePermission(value = "system:ticket:list", type = RequirePermission.Type.READ)
     public ResponseEntity<byte[]> downloadAttachment(@PathVariable Long id) throws IOException {
         TicketAttachmentDO attachment = ticketService.getAttachmentForDownload(id, SecurityUtils.getLoginUserIdOrZero());
         Path filePath = Paths.get(attachment.getFilePath());

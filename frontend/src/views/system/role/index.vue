@@ -60,6 +60,13 @@
         <el-table-column prop="name" label="角色名称" width="150" align="center" header-align="center" />
         <el-table-column prop="code" label="角色编码" width="150" align="center" header-align="center" />
         <el-table-column prop="sort" label="排序" width="100" align="center" header-align="center" />
+        <el-table-column prop="dataScope" label="数据范围" width="130" align="center" header-align="center">
+          <template #default="{ row }">
+            <el-tag :type="dataScopeTagType(row.dataScope)" effect="plain">
+              {{ dataScopeLabel(row.dataScope) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100" align="center" header-align="center">
           <template #default="{ row }">
             <el-switch
@@ -131,6 +138,30 @@
         <el-form-item label="排序" prop="sort">
           <el-input-number v-model="form.sort" :min="0" />
         </el-form-item>
+        <el-form-item label="数据范围" prop="dataScope">
+          <el-select v-model="form.dataScope" placeholder="请选择数据范围" style="width: 100%">
+            <el-option
+              v-for="item in dataScopeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="form.dataScope === 2" label="可见部门" prop="dataScopeDeptIds">
+          <el-tree-select
+            v-model="selectedDeptIds"
+            :data="deptOptions"
+            :props="{ label: 'name', children: 'children' }"
+            node-key="id"
+            multiple
+            show-checkbox
+            check-strictly
+            default-expand-all
+            placeholder="请选择可见部门"
+            style="width: 100%"
+          />
+        </el-form-item>
         <el-form-item label="状态" prop="status">
           <DictSelect
             v-model="form.status"
@@ -195,6 +226,7 @@ import {
   type RoleVO,
 } from '@/api/system/role'
 import { getMenuList, type MenuVO } from '@/api/system/menu'
+import { getDeptTree, type DeptVO } from '@/api/system/dept'
 import { buildMenuTree } from '@/utils/menu-tree'
 import RecycleCenterLink from '@/components/RecycleCenterLink.vue'
 
@@ -211,6 +243,26 @@ const menuTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
 const currentRole = ref<Partial<RoleVO>>({})
 const selectedMenus = ref<number[]>([])
 const menuOptions = ref<MenuVO[]>([])
+const deptOptions = ref<DeptVO[]>([])
+const selectedDeptIds = ref<number[]>([])
+
+const dataScopeOptions = [
+  { value: 1, label: '全部数据' },
+  { value: 2, label: '自定义部门' },
+  { value: 3, label: '本部门' },
+  { value: 4, label: '本部门及以下' },
+  { value: 5, label: '仅本人' },
+]
+
+const dataScopeLabel = (scope?: number) =>
+  dataScopeOptions.find((item) => item.value === scope)?.label || '全部数据'
+
+const dataScopeTagType = (scope?: number) => {
+  if (scope === 5) return 'info'
+  if (scope === 4 || scope === 3) return 'warning'
+  if (scope === 2) return 'success'
+  return 'primary'
+}
 
 const queryParams = reactive<RoleListQuery>({
   name: '',
@@ -224,6 +276,8 @@ const form = reactive<RoleSaveDTO>({
   sort: 0,
   status: 1,
   remark: '',
+  dataScope: 1,
+  dataScopeDeptIds: '',
 })
 
 const rules = {
@@ -255,15 +309,33 @@ const resetQuery = () => {
 
 const handleAdd = () => {
   resetForm()
+  loadDeptOptions()
   dialogTitle.value = '新增角色'
   dialogVisible.value = true
 }
 
 const handleEdit = (row: RoleVO) => {
   resetForm()
+  loadDeptOptions()
   dialogTitle.value = '编辑角色'
   Object.assign(form, row)
+  form.dataScope = row.dataScope ?? 1
+  form.dataScopeDeptIds = row.dataScopeDeptIds || ''
+  selectedDeptIds.value = (row.dataScopeDeptIds || '')
+    .split(',')
+    .map((id) => Number(id.trim()))
+    .filter((id) => Number.isFinite(id) && id > 0)
   dialogVisible.value = true
+}
+
+const loadDeptOptions = async () => {
+  if (deptOptions.value.length > 0) return
+  try {
+    const res = await getDeptTree()
+    deptOptions.value = res.data || []
+  } catch (error) {
+    console.error(error)
+  }
 }
 
 const handleDelete = async (row: RoleVO) => {
@@ -339,22 +411,32 @@ const resetForm = () => {
   form.sort = 0
   form.status = 1
   form.remark = ''
+  form.dataScope = 1
+  form.dataScopeDeptIds = ''
+  selectedDeptIds.value = []
 }
 
 const submitForm = async () => {
   if (!formRef.value) return
   await formRef.value.validate(async (valid) => {
-    if (valid) {
-      if (form.id) {
-        await updateRole(form)
-        ElMessage.success('修改成功')
-      } else {
-        await createRole(form)
-        ElMessage.success('新增成功')
-      }
-      dialogVisible.value = false
-      getList()
+    if (!valid) return
+    if (form.dataScope === 2 && selectedDeptIds.value.length === 0) {
+      ElMessage.warning('请选择自定义数据范围的部门')
+      return
     }
+    const payload: RoleSaveDTO = {
+      ...form,
+      dataScopeDeptIds: form.dataScope === 2 ? selectedDeptIds.value.join(',') : '',
+    }
+    if (form.id) {
+      await updateRole(payload)
+      ElMessage.success('修改成功')
+    } else {
+      await createRole(payload)
+      ElMessage.success('新增成功')
+    }
+    dialogVisible.value = false
+    getList()
   })
 }
 

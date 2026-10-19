@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class MessageWebSocketHandler extends TextWebSocketHandler {
 
-    private static final Map<Long, WebSocketSession> ONLINE_SESSIONS = new ConcurrentHashMap<>();
+    private static final Map<Long, java.util.Set<WebSocketSession>> ONLINE_SESSIONS = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -27,11 +27,19 @@ public class MessageWebSocketHandler extends TextWebSocketHandler {
         if (userId == null) {
             return;
         }
-        WebSocketSession old = ONLINE_SESSIONS.put(userId, session);
-        closeQuietly(old);
+        boolean isFirstSession = false;
+        java.util.Set<WebSocketSession> sessions = ONLINE_SESSIONS.computeIfAbsent(userId, k -> ConcurrentHashMap.newKeySet());
+        synchronized (sessions) {
+            if (sessions.isEmpty()) {
+                isFirstSession = true;
+            }
+            sessions.add(session);
+        }
         sendJson(session, Map.of("type", "connected", "content", "ok"));
-        broadcastPresence(userId, true);
-        log.info("WS connected userId={}, online={}", userId, ONLINE_SESSIONS.size());
+        if (isFirstSession) {
+            broadcastPresence(userId, true);
+        }
+        log.info("WS connected userId={}, userSessions={}, onlineUsers={}", userId, sessions.size(), ONLINE_SESSIONS.size());
     }
 
     @Override
@@ -59,17 +67,31 @@ public class MessageWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionClosed(@NonNull WebSocketSession session, @NonNull CloseStatus status) {
         Long userId = getUserId(session);
         if (userId != null) {
-            ONLINE_SESSIONS.remove(userId, session);
-            if (!ONLINE_SESSIONS.containsKey(userId)) {
+            java.util.Set<WebSocketSession> sessions = ONLINE_SESSIONS.get(userId);
+            boolean isLastSession = false;
+            if (sessions != null) {
+                synchronized (sessions) {
+                    sessions.remove(session);
+                    if (sessions.isEmpty()) {
+                        ONLINE_SESSIONS.remove(userId);
+                        isLastSession = true;
+                    }
+                }
+            }
+            if (isLastSession) {
                 broadcastPresence(userId, false);
             }
         }
     }
 
     public void sendToUser(Long userId, String json) {
-        WebSocketSession session = ONLINE_SESSIONS.get(userId);
-        if (session != null && session.isOpen()) {
-            sendRaw(session, json);
+        java.util.Set<WebSocketSession> sessions = ONLINE_SESSIONS.get(userId);
+        if (sessions != null && !sessions.isEmpty()) {
+            for (WebSocketSession session : sessions) {
+                if (session != null && session.isOpen()) {
+                    sendRaw(session, json);
+                }
+            }
         }
     }
 
@@ -139,12 +161,24 @@ public class MessageWebSocketHandler extends TextWebSocketHandler {
     }
 
     public boolean isOnline(Long userId) {
-        WebSocketSession session = ONLINE_SESSIONS.get(userId);
-        return session != null && session.isOpen();
+        java.util.Set<WebSocketSession> sessions = ONLINE_SESSIONS.get(userId);
+        if (sessions == null || sessions.isEmpty()) {
+            return false;
+        }
+        for (WebSocketSession session : sessions) {
+            if (session != null && session.isOpen()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void broadcast(String json) {
-        ONLINE_SESSIONS.values().forEach(s -> sendRaw(s, json));
+        ONLINE_SESSIONS.values().forEach(sessions -> {
+            if (sessions != null) {
+                sessions.forEach(s -> sendRaw(s, json));
+            }
+        });
     }
 
     /** 通知其他在线用户：某人上线/下线（企业 IM 联系人列表实时状态） */
@@ -155,9 +189,9 @@ public class MessageWebSocketHandler extends TextWebSocketHandler {
                     "userId", userId,
                     "online", online
             ));
-            ONLINE_SESSIONS.forEach((uid, s) -> {
-                if (!uid.equals(userId)) {
-                    sendRaw(s, json);
+            ONLINE_SESSIONS.forEach((uid, sessions) -> {
+                if (!uid.equals(userId) && sessions != null) {
+                    sessions.forEach(s -> sendRaw(s, json));
                 }
             });
         } catch (Exception e) {

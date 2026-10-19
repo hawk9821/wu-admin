@@ -8,7 +8,8 @@
 -- 【使用方式】
 --   全新安装（空库）  直接执行全文即可（自动检测空库放行 Part A/B）
 --                     示例: mysql -u wuadmin -p wuadmin < sql/admin_platform_prod.sql
---   已有库（有表）    勿跑全文 Part A/B；仅执行文末「附录」
+--   已有库（有表）    先执行 sql/migration/add19_upgrade_baseline_tables.sql 补表，
+--                     再执行文末「附录」；其余 addXX 按版本顺序执行
 --   强制重装         SET @WU_ADMIN_ALLOW_DROP=1; 后再执行全文（会 DROP 清库）
 --
 -- 【正文结构】
@@ -590,13 +591,14 @@ CREATE TABLE sys_api_access_log (
 DROP TABLE IF EXISTS sys_file;
 CREATE TABLE sys_file (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '文件ID',
-    original_name VARCHAR(200) DEFAULT '' COMMENT '原始文件名',
-    file_name VARCHAR(200) NOT NULL COMMENT '存储文件名',
+    dept_id BIGINT DEFAULT NULL COMMENT '归属部门ID',
+    original_name VARCHAR(255) DEFAULT '' COMMENT '原始文件名',
+    file_name VARCHAR(300) NOT NULL COMMENT '存储文件名',
     file_path VARCHAR(500) NOT NULL COMMENT '文件路径',
-    url VARCHAR(500) DEFAULT '' COMMENT '访问URL',
+    url VARCHAR(1024) DEFAULT '' COMMENT '访问URL',
     file_size BIGINT DEFAULT 0 COMMENT '文件大小（字节）',
     file_type VARCHAR(100) DEFAULT '' COMMENT 'MIME',
-    file_suffix VARCHAR(20) DEFAULT '' COMMENT '后缀',
+    file_suffix VARCHAR(32) DEFAULT '' COMMENT '后缀',
     storage_type VARCHAR(20) DEFAULT 'local' COMMENT '存储类型',
     bucket_name VARCHAR(100) DEFAULT '' COMMENT '桶名',
     group_id BIGINT DEFAULT NULL COMMENT '分组ID',
@@ -606,21 +608,25 @@ CREATE TABLE sys_file (
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT '是否删除',
     PRIMARY KEY (id),
+    INDEX idx_dept_id (dept_id),
     INDEX idx_group_id (group_id),
     INDEX idx_create_time (create_time),
     INDEX idx_group_time (group_id, create_time),
-    INDEX idx_deleted_update (deleted, update_time)
+    INDEX idx_deleted_update (deleted, update_time),
+    INDEX idx_file_path_bucket (file_path, bucket_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件记录表';
 
 DROP TABLE IF EXISTS sys_file_group;
 CREATE TABLE sys_file_group (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '分组ID',
+    dept_id BIGINT DEFAULT NULL COMMENT '归属部门ID',
     name VARCHAR(100) NOT NULL COMMENT '分组名称',
     sort INT DEFAULT 0 COMMENT '排序',
     create_by VARCHAR(64) DEFAULT NULL COMMENT '创建者',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (id)
+    PRIMARY KEY (id),
+    INDEX idx_dept_id (dept_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件分组表';
 
 -- §15b 短信发送记录（sys_sms_log）
@@ -764,62 +770,83 @@ CREATE TABLE sys_ai_chat_log (
     INDEX idx_create_time (create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 对话日志审计表';
 
+-- AI 知识库
+CREATE TABLE IF NOT EXISTS sys_ai_knowledge (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '知识ID',
+    title VARCHAR(128) NOT NULL DEFAULT '' COMMENT '知识标题',
+    keywords VARCHAR(255) NOT NULL DEFAULT '' COMMENT '检索关键词(逗号分隔)',
+    content TEXT NOT NULL COMMENT '知识正文(Markdown)',
+    category VARCHAR(32) NOT NULL DEFAULT 'faq' COMMENT '分类: faq/manual/module/other',
+    sort INT NOT NULL DEFAULT 0 COMMENT '排序权重(大者优先)',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态: 1启用 0停用',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    creator VARCHAR(64) DEFAULT '' COMMENT '创建者',
+    updater VARCHAR(64) DEFAULT '' COMMENT '更新者',
+    deleted TINYINT DEFAULT 0 COMMENT '是否删除',
+    INDEX idx_status_category (status, category),
+    FULLTEXT INDEX ft_knowledge (title, keywords, content) WITH PARSER ngram
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 知识库';
+
+-- =============================================================================
+-- Part A.5  安全审计结构
+-- 旧库补 action + create_time 索引请执行 sql/migration/add21_security_event_action_index.sql
+-- =============================================================================
+
+-- 安全审计与反爬拦截事件表
+CREATE TABLE IF NOT EXISTS `sys_security_event` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `event_type` VARCHAR(32) NOT NULL COMMENT '事件类型',
+  `principal` VARCHAR(128) NOT NULL DEFAULT '' COMMENT '主体标识(IP或账号)',
+  `ipaddr` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '客户端真实IP',
+  `request_uri` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '请求路径',
+  `request_method` VARCHAR(16) NOT NULL DEFAULT '' COMMENT '请求方法(GET/POST/PUT/DELETE)',
+  `user_agent` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '请求User-Agent头',
+  `risk_delta` INT NOT NULL DEFAULT 0 COMMENT '本次触发风险分增量',
+  `total_risk_score` INT NOT NULL DEFAULT 0 COMMENT '触发后累计风险分',
+  `action` VARCHAR(32) NOT NULL DEFAULT 'BLOCKED' COMMENT '处置动作',
+  `reason` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '触发原因详细说明',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '触发时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_event_type` (`event_type`),
+  KEY `idx_ipaddr` (`ipaddr`),
+  KEY `idx_create_time` (`create_time`),
+  KEY `idx_action_time` (`action`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='安全审计与反爬拦截事件表';
+
 -- =============================================================================
 -- Part B  初始化数据
 -- =============================================================================
 
--- 部门（id=1 为本部虚拟根，界面隐藏；二级为各中心）
+-- 部门（精简为 3 个标准部门）
 INSERT INTO sys_dept (id, name, parent_id, ancestors, sort, status, leader_name, leader_user_id) VALUES
-(1, '本部', 0, '0', 0, 1, '管理员', 1),
-(2, '技术中心', 1, '0,1', 1, 1, NULL, NULL),
-(3, '业务中心', 1, '0,1', 2, 1, NULL, NULL),
-(4, '职能中心', 1, '0,1', 3, 1, NULL, NULL),
-(5, '运营中心', 1, '0,1', 4, 1, NULL, NULL),
-(6, '研发部', 2, '0,1,2', 1, 1, '张三', 2),
-(7, '运维部', 2, '0,1,2', 2, 1, NULL, NULL),
-(8, '产品部', 2, '0,1,2', 3, 1, NULL, NULL),
-(9, '市场部', 3, '0,1,3', 1, 1, '李四', NULL),
-(10, '财务部', 4, '0,1,4', 1, 1, '王五', NULL),
-(11, '人事部', 4, '0,1,4', 2, 1, NULL, NULL),
-(12, '实训部', 5, '0,1,5', 1, 1, NULL, NULL),
-(13, '客服部', 5, '0,1,5', 2, 1, NULL, NULL),
-(14, '前端组', 6, '0,1,2,6', 1, 1, NULL, NULL),
-(15, '后端组', 6, '0,1,2,6', 2, 1, NULL, NULL);
+(1, '总公司', 0, '0', 1, 1, '管理员', 1),
+(2, '研发部', 1, '0,1', 1, 1, '张三', 2),
+(3, '运营部', 1, '0,1', 2, 1, NULL, NULL);
 
--- 岗位（树形层级）
+-- 岗位（精简为 3 个黄金标准岗位）
 INSERT INTO sys_post (id, parent_id, post_code, post_name, sort, status, remark) VALUES
-(1, 0, 'chairman', '董事长', 0, 1, '岗位体系根'),
-(2, 1, 'ceo', '总经理', 1, 1, ''),
-(3, 2, 'cto', '技术总监', 1, 1, ''),
-(4, 2, 'dev_exec', '开发工程师', 2, 1, ''),
-(5, 2, 'biz_line', '业务体系', 3, 1, '岗位分类'),
-(6, 2, 'func_line', '职能体系', 4, 1, '岗位分类'),
-(7, 2, 'ops_line', '运营体系', 5, 1, '岗位分类'),
-(8, 3, 'dev', '研发工程师', 1, 1, ''),
-(9, 8, 'dev_lead', '研发组长', 0, 1, ''),
-(10, 8, 'fe_dev', '前端开发', 1, 1, ''),
-(11, 8, 'be_dev', '后端开发', 2, 1, ''),
-(12, 3, 'qa', '测试', 2, 1, ''),
-(13, 12, 'qa_lead', '测试组长', 0, 1, ''),
-(14, 3, 'product_mgr', '产品经理', 3, 1, ''),
-(15, 3, 'ops_eng', '运维工程师', 4, 1, ''),
-(16, 5, 'market_spec', '市场专员', 1, 1, ''),
-(17, 6, 'finance_mgr', '财务主管', 1, 1, ''),
-(18, 6, 'hr_spec', '人事专员', 2, 1, ''),
-(19, 7, 'train_lecturer', '实训讲师', 1, 1, '');
+(1, 0, 'ceo', '总经理', 1, 1, '企业最高经营管理负责人'),
+(2, 1, 'cto', '技术总监', 2, 1, '技术与研发整体负责人'),
+(3, 2, 'dev', '研发工程师', 3, 1, '核心开发与技术实现');
 
-ALTER TABLE sys_dept AUTO_INCREMENT = 16;
-ALTER TABLE sys_post AUTO_INCREMENT = 20;
+ALTER TABLE sys_dept AUTO_INCREMENT = 4;
+ALTER TABLE sys_post AUTO_INCREMENT = 4;
+
+-- 用户岗位关联
+INSERT INTO sys_user_post (user_id, post_id) VALUES
+(1, 1),
+(2, 3);
 
 -- 用户（默认密码 admin123，BCrypt 加密）
 INSERT INTO sys_user (id, username, password, nickname, mobile, email, status, dept_id) VALUES
 (1, 'admin', '$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2', '管理员', NULL, NULL, 1, 1),
-(2, 'zhangsan', '$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2', '张三', NULL, NULL, 1, 6);
+(2, 'zhangsan', '$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2', '张三', NULL, NULL, 1, 2);
 
 -- 角色
-INSERT INTO sys_role (id, name, code, sort, status, remark) VALUES
-(1, '超级管理员', 'super_admin', 1, 1, '超级管理员，拥有所有权限'),
-(2, '普通用户', 'user', 2, 1, '仅部分功能');
+INSERT INTO sys_role (id, name, code, sort, status, remark, data_scope) VALUES
+(1, '超级管理员', 'super_admin', 1, 1, '超级管理员，拥有所有权限', 1),
+(2, '普通用户', 'user', 2, 1, '仅部分功能', 4);
 
 -- 字典（含工单/审批业务字典 type 4～7）
 INSERT INTO sys_dict_type (id, dict_name, dict_type, status, remark) VALUES
@@ -864,14 +891,14 @@ INSERT INTO sys_config_group (group_code, group_name, config_value, remark) VALU
 ('site', '基础信息', '{"platformName":"Admin Platform","platformSubtitle":"统一运维 · 高效管控","loginWelcome":"Welcome","registerTitle":"Sign Up","copyright":"","icpEnabled":true,"icpNumber":"粤ICP备XXXXXXXX号-1","icpUrl":"https://beian.miit.gov.cn"}', '平台展示名称与登录页文案'),
 ('session', '会话配置', '{"tokenExpireHours":24,"sessionSignExpireHours":24}', 'JWT 与 Redis 会话有效期（小时）'),
 ('file', '文件配置', '{"maxSizeMb":50,"allowedExtensions":"jpg,jpeg,png,gif,webp,bmp,svg,pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,json,xml,zip,rar,mp4,mp3,wav,avi,mov"}', '文件管理上传限制'),
-('rateLimit', '接口限流', '{"captchaPerIpMinute":40,"loginPerIpMinute":30,"registerPerIpMinute":10,"smsPerIpMinute":5,"smsSendIntervalSeconds":60,"smsPerPhoneDaily":10,"smsPerIpDaily":30}', '认证接口按 IP 限流；含短信防刷'),
+('rateLimit', '接口限流', '{"captchaPerIpMinute":40,"loginPerIpMinute":30,"registerPerIpMinute":10,"smsPerIpMinute":5,"smsSendIntervalSeconds":60,"smsPerPhoneDaily":10,"smsPerIpDaily":30,"apiPerIpMinute":240,"authPerIpMinute":60,"filesPerIpMinute":600}', '认证接口按 IP 限流；含应用层滑动窗口与短信防刷'),
 ('login', '登录配置', '{"captchaEnabled":true,"captchaType":"image","smsLoginEnabled":false,"smsLoginSliderCaptchaEnabled":false,"rememberMe":true,"maxRetryCount":5,"maxRetryCountIp":20,"lockTime":10}', '验证码 image/slider；smsLoginEnabled 短信登录；smsLoginSliderCaptchaEnabled 短信发送前滑块；maxRetryCount 账号锁定阈值；maxRetryCountIp IP 锁定阈值'),
 ('register', '注册配置', '{"enabled":true,"captchaEnabled":true,"captchaType":"image","defaultRoleCode":"user","needAudit":false,"minPasswordLength":6}', '开放注册、验证码类型、默认角色、是否审核'),
 ('thirdParty', '第三方配置', '{"wechat":{"enabled":false,"appId":"","appSecret":""},"alipay":{"enabled":false,"appId":"","privateKey":"","publicKey":""},"github":{"enabled":false,"clientId":"","clientSecret":""},"google":{"enabled":false,"clientId":"","clientSecret":"","redirectUri":""}}', '微信/支付宝/GitHub/Google 第三方登录'),
 ('payment', '支付配置', '{"wechatPay":{"enabled":false,"mchId":"","appId":"","apiV3Key":"","privateKey":"","certSerialNo":"","notifyUrl":""},"alipay":{"enabled":false,"appId":"","privateKey":"","publicKey":"","signType":"RSA2","gatewayUrl":"https://openapi.alipay.com/gateway.do","notifyUrl":"","returnUrl":""}}', '微信/支付宝支付与测试下单'),
 ('sms', '短信配置', '{"enabled":false,"provider":"aliyunAuth","accessKeyId":"","accessKeySecret":"","signName":"","tencentAppId":"","templateVerifyCode":"100001","templateModifyPhone":"100002","templateResetPassword":"100003","templateBindPhone":"100004","templateVerifyBindPhone":"100005","schemeName":"","codeExpireMinutes":5}', '阿里云短信认证/腾讯云'),
 ('email', '邮件配置', '{"enabled":false,"provider":"qq","host":"smtp.qq.com","port":465,"username":"","password":"","fromName":"wu-admin 系统团队","authEnabled":true,"securityType":"SSL","connectionTimeoutMs":5000,"timeoutMs":5000,"writeTimeoutMs":5000,"encoding":"UTF-8","debug":false,"codeExpireMinutes":5,"codeLength":6,"dailyLimitPerEmail":20,"sendIntervalSeconds":60}', '企业级 SMTP 邮件服务配置：发件人、SSL端口、超时限额与验证码防刷规则'),
-('security', '安全配置', '{"disableDevtool":false,"isConcurrent":false,"sm4EncryptEnabled":true,"sm2SignEnabled":true,"sm3SignEnabled":true,"timestampEnabled":true,"nonceEnabled":true}', '安全防线与会话：SM4加密（会话密钥）、HMAC-SM3数字签名、时间戳与Nonce防重放');
+('security', '安全配置', '{"disableDevtool":false,"isConcurrent":false,"sm4EncryptEnabled":true,"sm2SignEnabled":true,"sm3SignEnabled":true,"timestampEnabled":true,"nonceEnabled":true,"riskBlockScore":80,"riskBanScore":120}', '安全防线与会话：SM4加密（会话密钥）、HMAC-SM3数字签名、时间戳与Nonce防重放、风险分封禁阈值');
 
 -- 菜单与按钮（一级目录 sort：系统管理 1 / 监控 3 / 日志 4 / 文件 5 / 消息 6 / 流程 7 / 工具 8）
 INSERT INTO sys_menu (id, name, permission, type, sort, parent_id, path, icon, component, status) VALUES
@@ -887,13 +914,13 @@ INSERT INTO sys_menu (id, name, permission, type, sort, parent_id, path, icon, c
 (5, '组织管理', 'system:dept:list', 2, 4, 1, '/system/org', 'OfficeBuilding', 'system/org/index', 1),
 -- 字典管理
 (130, '字典管理', 'system:dict:list', 2, 5, 1, '/system/dict', 'Collection', 'system/dict/index', 1),
-(160, '系统配置', 'system:config:list', 2, 6, 1, '/system/config', 'Tools', 'system/config/index', 1),
-(163, '回收中心', 'system:recycle:list', 2, 7, 1, '/system/recycle', 'Delete', 'system/recycle/index', 1),
+(160, '系统配置', 'system:config:list', 2, 7, 1, '/system/config', 'Tools', 'system/config/index', 1),
+(163, '回收中心', 'system:recycle:list', 2, 6, 1, '/system/recycle', 'Delete', 'system/recycle/index', 1),
 (191, '回收中心查询', 'system:recycle:query', 3, 1, 163, '', '', '', 1),
 (192, '回收中心恢复', 'system:recycle:restore', 3, 2, 163, '', '', '', 1),
 (193, '回收中心删除', 'system:recycle:delete', 3, 3, 163, '', '', '', 1),
 -- 流程中心目录（审批 + 工单）
-(8, '流程中心', '', 1, 7, 0, '/workflow', 'Operation', '', 1),
+(8, '流程中心', '', 1, 7, 0, '/workflow', 'Workflow', '', 1),
 -- 审批单中心
 (9, '审批单中心', 'system:approval:list', 2, 1, 8, '/system/approval', 'Checked', 'system/approval/index', 1),
 -- 工单管理（隶属流程中心）
@@ -974,10 +1001,10 @@ INSERT INTO sys_menu (id, name, permission, type, sort, parent_id, path, icon, c
 (188, '缓存查询', 'monitor:cache:query', 3, 1, 185, '', '', '', 1),
 (186, '缓存删除', 'monitor:cache:delete', 3, 2, 185, '', '', '', 1),
 -- 服务监控
-(187, '服务监控', 'monitor:server:list', 2, 5, 100, '/monitor/server', 'Cpu', 'monitor/server/index', 1),
+(187, '服务监控', 'monitor:server:list', 2, 5, 100, '/monitor/server', 'Odometer', 'monitor/server/index', 1),
 (189, '服务监控查询', 'monitor:server:query', 3, 1, 187, '', '', '', 1),
 -- 系统日志目录
-(120, '系统日志', '', 1, 4, 0, '/log', 'Notebook', '', 1),
+(120, '系统日志', '', 1, 4, 0, '/log', 'Calendar', '', 1),
 (121, '操作日志', 'system:operLog:list', 2, 1, 120, '/system/oper-log', 'EditPen', 'system/oper-log/index', 1),
 (126, '操作日志查询', 'system:operLog:query', 3, 1, 121, '', '', '', 1),
 (127, '操作日志删除', 'system:operLog:delete', 3, 2, 121, '', '', '', 1),
@@ -1005,8 +1032,8 @@ INSERT INTO sys_menu (id, name, permission, type, sort, parent_id, path, icon, c
 (177, '通知发布', 'system:announce:publish', 3, 5, 171, '', '', '', 1),
 (178, '聊天查询', 'system:chat:query', 3, 1, 172, '', '', '', 1),
 -- AI 管理（顶级目录 210，排在开发工具之前）
-(210, 'AI 管理', '', 1, 8, 0, '/ai', 'MagicStick', '', 1),
-(200, 'AI 模型配置', 'system:ai-model:list', 2, 1, 210, '/ai/model', 'MagicStick', 'ai/model/index', 1),
+(210, 'AI 管理', '', 1, 8, 0, '/ai', 'Compass', '', 1),
+(200, 'AI 模型配置', 'system:ai-model:list', 2, 1, 210, '/ai/model', 'AiModel', 'ai/model/index', 1),
 (207, 'AI模型查询', 'system:ai-model:query', 3, 1, 200, '', '', '', 1),
 (201, 'AI模型新增', 'system:ai-model:create', 3, 2, 200, '', '', '', 1),
 (202, 'AI模型修改', 'system:ai-model:update', 3, 3, 200, '', '', '', 1),
@@ -1075,27 +1102,36 @@ INSERT INTO sys_role_menu (role_id, menu_id) VALUES
 -- =============================================================================
 
 -- =============================================================================
+-- 安全风控菜单（ID 230~235）
+INSERT IGNORE INTO sys_menu (id, name, permission, type, sort, parent_id, path, icon, component, status) VALUES
+(230, '安全风控', 'system:security:list', 2, 3, 120, '/system/security-log', 'Lock', 'system/security-log/index', 1),
+(231, '安全查询', 'system:security:query', 3, 1, 230, '', '', '', 1),
+(232, '风险解封', 'system:security:unblock', 3, 2, 230, '', '', '', 1),
+(233, '手动拉黑', 'system:security:block', 3, 3, 230, '', '', '', 1),
+(234, '清空安全日志', 'system:security:clear', 3, 4, 230, '', '', '', 1),
+(235, '删除安全日志', 'system:security:delete', 3, 5, 230, '', '', '', 1);
+
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES
+(1,230),(1,231),(1,232),(1,233),(1,234),(1,235);
+
 -- 附录：已有库升级（极旧库首次补丁；可重复执行，无 DROP）
 -- 执行: 在客户端选中本节至文件末尾，或 mysql ... wuadmin < admin_platform_prod.sql 仅当已跳过 Part A/B
 -- 菜单默认 INSERT IGNORE，不覆盖 name/path/icon
+--
+-- [附录·建表] 附录不再重复 Part A 的 CREATE TABLE。
+-- 旧库缺表请先执行 sql/migration/add19_upgrade_baseline_tables.sql，
+-- 再执行本附录中的 ALTER / 数据补丁。
 -- =============================================================================
 
 SET @WU_ADMIN_SYNC_MENU := IFNULL(@WU_ADMIN_SYNC_MENU, 0);
 
--- [附录·基础] 极旧库可能无配置分组表
-CREATE TABLE IF NOT EXISTS sys_config_group (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
-    group_code VARCHAR(50) NOT NULL COMMENT '分组编码',
-    group_name VARCHAR(100) NOT NULL COMMENT '分组名称',
-    config_value TEXT NOT NULL COMMENT 'JSON 配置',
-    remark VARCHAR(255) DEFAULT NULL COMMENT '备注',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    creator VARCHAR(64) DEFAULT '',
-    updater VARCHAR(64) DEFAULT '',
-    deleted TINYINT DEFAULT 0,
-    UNIQUE KEY uk_group_code (group_code)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统配置分组';
+-- [附录·文件] 文件表结构升级（dept_id、索引、url 容量）请执行迁移脚本：
+--   sql/migration/add12_storage_schema_hardening.sql
+--   sql/migration/add18_remove_tenant_enable_org_isolation.sql
+--   sql/migration/add20_sys_file_path_index.sql
+-- 迁移脚本已纳入版本控制，避免与全量建表语句重复维护。
+
+-- [附录·基础] 配置分组表由 sql/migration/add19_upgrade_baseline_tables.sql 补齐
 
 -- [附录·配置] 注册/登录 captchaType 补全（缺省 image）
 UPDATE sys_config_group
@@ -1180,52 +1216,8 @@ INSERT IGNORE INTO sys_menu (id, name, permission, type, sort, parent_id, path, 
 INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES
 (1, 164), (1, 165), (1, 166), (1, 167), (1, 168), (1, 169), (1, 179);
 
--- [附录·表] 代码生成元数据表
-CREATE TABLE IF NOT EXISTS gen_table (
-    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '编号',
-    table_name VARCHAR(200) DEFAULT '' COMMENT '表名称',
-    table_comment VARCHAR(500) DEFAULT '' COMMENT '表描述',
-    class_name VARCHAR(100) DEFAULT '' COMMENT '实体类名称',
-    package_name VARCHAR(100) DEFAULT '' COMMENT '生成包路径',
-    module_name VARCHAR(30) DEFAULT '' COMMENT '生成模块名',
-    business_name VARCHAR(30) DEFAULT '' COMMENT '生成业务名',
-    function_name VARCHAR(50) DEFAULT '' COMMENT '生成功能名',
-    author VARCHAR(50) DEFAULT '' COMMENT '作者',
-    gen_type VARCHAR(10) DEFAULT 'crud' COMMENT '生成类型',
-    gen_path VARCHAR(200) DEFAULT '/' COMMENT '生成路径',
-    front_type VARCHAR(30) DEFAULT 'element-plus' COMMENT '前端模板',
-    form_layout VARCHAR(20) DEFAULT 'vertical' COMMENT '表单布局',
-    parent_menu_id BIGINT DEFAULT NULL COMMENT '上级菜单ID',
-    remark VARCHAR(500) DEFAULT NULL,
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    update_time DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '是否删除',
-    PRIMARY KEY (id),
-    UNIQUE INDEX uk_gen_table_name_deleted (table_name, deleted)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='代码生成业务表';
+-- [附录·表] 代码生成元数据表由 sql/migration/add19_upgrade_baseline_tables.sql 补齐
 
-CREATE TABLE IF NOT EXISTS gen_table_column (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    table_id BIGINT DEFAULT NULL,
-    column_name VARCHAR(200) DEFAULT '',
-    column_comment VARCHAR(500) DEFAULT '',
-    column_type VARCHAR(100) DEFAULT '',
-    java_type VARCHAR(50) DEFAULT '',
-    java_field VARCHAR(200) DEFAULT '',
-    is_pk TINYINT DEFAULT 0,
-    is_increment TINYINT DEFAULT 0,
-    is_required TINYINT DEFAULT 0,
-    is_insert TINYINT DEFAULT 0,
-    is_edit TINYINT DEFAULT 0,
-    is_list TINYINT DEFAULT 0,
-    is_query TINYINT DEFAULT 0,
-    query_type VARCHAR(20) DEFAULT 'EQ',
-    html_type VARCHAR(50) DEFAULT '',
-    dict_type VARCHAR(100) DEFAULT '',
-    sort INT DEFAULT 0,
-    PRIMARY KEY (id),
-    INDEX idx_gen_col_table (table_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='代码生成字段表';
 
 -- [附录·表] gen_table 唯一索引升级（#12；IF NOT EXISTS 无法修改已存在表的索引）
 DELETE c FROM gen_table_column c
@@ -1385,127 +1377,15 @@ WHERE id = 126
 
 INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES (1, 126);
 
--- [附录·消息] 表与菜单补建（正文 §11b 已全量建表）
-CREATE TABLE IF NOT EXISTS sys_announce (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
-    title VARCHAR(200) NOT NULL COMMENT '标题',
-    content TEXT COMMENT '内容',
-    notice_type TINYINT DEFAULT 1 COMMENT '1通知 2公告',
-    channels VARCHAR(200) DEFAULT '["station"]' COMMENT '推送渠道JSON',
-    target_type TINYINT DEFAULT 3 COMMENT '1指定用户 2按部门 3全部',
-    target_ids VARCHAR(500) DEFAULT NULL COMMENT '目标ID JSON数组',
-    status TINYINT DEFAULT 0 COMMENT '0草稿 1已发布',
-    create_by BIGINT DEFAULT NULL COMMENT '创建人ID',
-    create_name VARCHAR(50) DEFAULT NULL COMMENT '创建人昵称',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    creator VARCHAR(64) DEFAULT '',
-    updater VARCHAR(64) DEFAULT '',
-    deleted TINYINT DEFAULT 0,
-    INDEX idx_status_time (status, create_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统通知/公告';
+-- [附录·消息] 消息表由 sql/migration/add19_upgrade_baseline_tables.sql 补齐；以下仅保留菜单补丁
 
-CREATE TABLE IF NOT EXISTS sys_user_announce (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL COMMENT '接收用户',
-    announce_id BIGINT NOT NULL COMMENT '通知ID',
-    is_read TINYINT DEFAULT 0 COMMENT '0未读 1已读',
-    read_time DATETIME DEFAULT NULL,
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_user_announce (user_id, announce_id),
-    INDEX idx_user_read (user_id, is_read)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户通知已读';
 
-CREATE TABLE IF NOT EXISTS sys_announce_send_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    announce_id BIGINT NOT NULL,
-    channel VARCHAR(50) NOT NULL COMMENT 'station等',
-    status TINYINT DEFAULT 1 COMMENT '0失败 1成功',
-    target_count INT DEFAULT 0,
-    success_count INT DEFAULT 0,
-    error_msg VARCHAR(500) DEFAULT NULL,
-    send_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_announce_id (announce_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通知推送日志';
 
-CREATE TABLE IF NOT EXISTS sys_chat_message (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    sender_id BIGINT NOT NULL,
-    sender_name VARCHAR(50) DEFAULT NULL,
-    sender_avatar VARCHAR(255) DEFAULT NULL,
-    receiver_id BIGINT NOT NULL,
-    content TEXT,
-    msg_type TINYINT DEFAULT 1 COMMENT '1文本 2图片',
-    is_read TINYINT DEFAULT 0,
-    send_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_sender (sender_id),
-    INDEX idx_receiver (receiver_id),
-    INDEX idx_receiver_unread (receiver_id, is_read, sender_id),
-    INDEX idx_pair_time (sender_id, receiver_id, send_time),
-    INDEX idx_send_time (send_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='私聊消息';
 
-CREATE TABLE IF NOT EXISTS sys_user_blacklist (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL COMMENT '拉黑方',
-    blocked_user_id BIGINT NOT NULL COMMENT '被拉黑用户',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_user_blocked (user_id, blocked_user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='聊天黑名单';
 
-CREATE TABLE IF NOT EXISTS sys_chat_group (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    avatar VARCHAR(500) DEFAULT NULL,
-    owner_id BIGINT NOT NULL,
-    announcement VARCHAR(500) DEFAULT NULL,
-    max_members INT DEFAULT 200,
-    status TINYINT DEFAULT 1 COMMENT '0解散 1正常',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_owner (owner_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='群聊';
 
-CREATE TABLE IF NOT EXISTS sys_chat_group_member (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    group_id BIGINT NOT NULL,
-    user_id BIGINT NOT NULL,
-    nickname VARCHAR(50) DEFAULT NULL,
-    role TINYINT DEFAULT 0 COMMENT '0成员 1管理员 2群主',
-    muted TINYINT DEFAULT 0,
-    notify_muted TINYINT DEFAULT 0 COMMENT '0正常 1免打扰仅@提醒',
-    announcement_read_time DATETIME DEFAULT NULL COMMENT '群公告已读时间',
-    join_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_group_user (group_id, user_id),
-    INDEX idx_user_id (user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='群成员';
 
-CREATE TABLE IF NOT EXISTS sys_chat_group_message (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    group_id BIGINT NOT NULL,
-    sender_id BIGINT NOT NULL,
-    sender_name VARCHAR(50) DEFAULT NULL,
-    sender_avatar VARCHAR(500) DEFAULT NULL,
-    content TEXT NOT NULL,
-    msg_type TINYINT DEFAULT 1,
-    mention_ids VARCHAR(500) DEFAULT NULL COMMENT '@的用户ID列表JSON',
-    send_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_group_time (group_id, send_time),
-    INDEX idx_send_time (send_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='群消息';
 
-CREATE TABLE IF NOT EXISTS sys_chat_group_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    group_id BIGINT NOT NULL COMMENT '群ID',
-    action_type VARCHAR(32) NOT NULL COMMENT '操作类型',
-    operator_id BIGINT NOT NULL COMMENT '操作人',
-    operator_name VARCHAR(50) DEFAULT NULL COMMENT '操作人昵称',
-    target_user_id BIGINT DEFAULT NULL COMMENT '目标用户',
-    target_user_name VARCHAR(50) DEFAULT NULL COMMENT '目标用户昵称',
-    detail VARCHAR(500) DEFAULT NULL COMMENT '补充说明',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_group_time (group_id, create_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='群聊操作日志';
 
 INSERT IGNORE INTO sys_menu (id, name, permission, type, sort, parent_id, path, icon, component, status) VALUES
 (170, '消息中心', '', 1, 6, 0, '/message', 'Bell', '', 1),
@@ -1595,6 +1475,9 @@ WHERE u.deleted = 0
 UPDATE sys_dict_data SET dict_label = '启用' WHERE dict_type = 'sys_normal_disable' AND dict_value = '1';
 UPDATE sys_dict_data SET dict_label = '禁用' WHERE dict_type = 'sys_normal_disable' AND dict_value = '0';
 
+/* 旧库组织/岗位迁移已由 sql/migration/add11 接管。
+   全量脚本全新安装时，Part B 已写入 3 个标准部门与 3 个标准岗位，
+   此处若继续执行旧的中心分级迁移，会把新结构覆盖回旧结构。
 -- [附录·组织] 扁平部门树 → 中心分级（正文 Part B 已是分级结果，旧库才需执行）
 UPDATE sys_dept SET name = '本部' WHERE id = 1 AND name = '总公司' AND deleted = 0;
 
@@ -1715,6 +1598,7 @@ INNER JOIN sys_post qa ON qa.post_code = 'qa' AND qa.deleted = 0
 SET x.parent_id = qa.id
 WHERE x.post_code = 'qa_lead' AND x.deleted = 0 AND x.parent_id <> qa.id;
 
+*/
 -- [附录·菜单] 一级目录排序（日志 4 / 文件 5 / 消息 6 / 工具 7）
 UPDATE sys_menu SET sort = 4 WHERE id = 120 AND parent_id = 0 AND deleted = 0;
 UPDATE sys_menu SET sort = 5 WHERE id = 105 AND parent_id = 0 AND deleted = 0;
@@ -1767,44 +1651,8 @@ DELIMITER ;
 CALL sp_wu_admin_sync_builtin_menus();
 DROP PROCEDURE IF EXISTS sp_wu_admin_sync_builtin_menus;
 
--- [附录·任务] 表 / 菜单 / 内置任务补建（正文 §7.3 已全量；含历史任务迁移）
-CREATE TABLE IF NOT EXISTS sys_job (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
-    job_name VARCHAR(64) NOT NULL COMMENT '任务名称',
-    job_group VARCHAR(64) DEFAULT 'DEFAULT' COMMENT '任务组名',
-    invoke_target VARCHAR(500) NOT NULL COMMENT '调用目标字符串',
-    cron_expression VARCHAR(255) DEFAULT NULL COMMENT 'cron执行表达式',
-    misfire_policy TINYINT DEFAULT 3 COMMENT '计划执行错误策略(1-立即执行 2-执行一次 3-放弃执行)',
-    concurrent TINYINT DEFAULT 1 COMMENT '是否并发执行(0-允许 1-禁止)',
-    status TINYINT DEFAULT 0 COMMENT '状态(0-暂停 1-正常)',
-    remark VARCHAR(500) DEFAULT NULL COMMENT '备注',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    creator VARCHAR(64) DEFAULT '' COMMENT '创建者',
-    updater VARCHAR(64) DEFAULT '' COMMENT '更新者',
-    deleted TINYINT DEFAULT 0 COMMENT '是否删除',
-    INDEX idx_job_group (job_group),
-    INDEX idx_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务表';
+-- [附录·任务] 任务表由 sql/migration/add19_upgrade_baseline_tables.sql 补齐；以下保留菜单与内置任务补丁
 
-CREATE TABLE IF NOT EXISTS sys_job_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
-    job_name VARCHAR(64) NOT NULL COMMENT '任务名称',
-    job_group VARCHAR(64) DEFAULT NULL COMMENT '任务组名',
-    invoke_target VARCHAR(500) DEFAULT NULL COMMENT '调用目标字符串',
-    job_message VARCHAR(500) DEFAULT NULL COMMENT '日志信息',
-    status TINYINT DEFAULT 0 COMMENT '执行状态(0-正常 1-失败)',
-    exception_info VARCHAR(2000) DEFAULT NULL COMMENT '异常信息',
-    start_time DATETIME DEFAULT NULL COMMENT '开始时间',
-    stop_time DATETIME DEFAULT NULL COMMENT '停止时间',
-    duration_ms BIGINT DEFAULT NULL COMMENT '执行耗时(毫秒)',
-    deleted TINYINT DEFAULT 0 COMMENT '是否删除',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    INDEX idx_job_name (job_name),
-    INDEX idx_start_time (start_time),
-    INDEX idx_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务日志表';
 
 -- [附录·任务] sys_job_log 增加毫秒级耗时（#16；旧表补列）
 SET @col_exists := (
@@ -1829,7 +1677,7 @@ INSERT IGNORE INTO sys_menu (id, name, permission, type, sort, parent_id, path, 
 (185, '缓存监控', 'monitor:cache:list', 2, 4, 100, '/monitor/cache', 'Coin', 'monitor/cache/index', 1),
 (188, '缓存查询', 'monitor:cache:query', 3, 1, 185, '', '', '', 1),
 (186, '缓存删除', 'monitor:cache:delete', 3, 2, 185, '', '', '', 1),
-(187, '服务监控', 'monitor:server:list', 2, 5, 100, '/monitor/server', 'Cpu', 'monitor/server/index', 1),
+(187, '服务监控', 'monitor:server:list', 2, 5, 100, '/monitor/server', 'Odometer', 'monitor/server/index', 1),
 (189, '服务监控查询', 'monitor:server:query', 3, 1, 187, '', '', '', 1);
 
 INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES
@@ -1940,27 +1788,6 @@ INSERT INTO sys_config_group (group_code, group_name, config_value, remark) VALU
 ('sms', '短信配置', '{"enabled":false,"provider":"aliyunAuth","accessKeyId":"","accessKeySecret":"","signName":"","tencentAppId":"","templateVerifyCode":"100001","templateModifyPhone":"100002","templateResetPassword":"100003","templateBindPhone":"100004","templateVerifyBindPhone":"100005","schemeName":"","codeExpireMinutes":5}', '阿里云短信认证/腾讯云')
 ON DUPLICATE KEY UPDATE group_name = VALUES(group_name), remark = VALUES(remark);
 
-CREATE TABLE IF NOT EXISTS sys_sms_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
-    phone VARCHAR(20) NOT NULL COMMENT '手机号',
-    content VARCHAR(500) DEFAULT NULL COMMENT '短信内容/验证码',
-    sms_type VARCHAR(20) DEFAULT 'verify_code' COMMENT 'verify_code / notice / marketing',
-    template_id VARCHAR(50) DEFAULT NULL COMMENT '模板ID',
-    template_params VARCHAR(500) DEFAULT NULL COMMENT '模板参数 JSON',
-    provider VARCHAR(20) DEFAULT NULL COMMENT 'aliyun / tencent / console',
-    status TINYINT DEFAULT 0 COMMENT '0-发送中 1-成功 2-失败',
-    result_msg VARCHAR(500) DEFAULT NULL COMMENT '结果信息',
-    biz_id VARCHAR(100) DEFAULT NULL COMMENT '服务商消息ID',
-    send_time DATETIME DEFAULT NULL COMMENT '发送时间',
-    user_id BIGINT DEFAULT NULL COMMENT '用户ID',
-    biz_type VARCHAR(30) DEFAULT NULL COMMENT '业务类型',
-    ip VARCHAR(50) DEFAULT NULL COMMENT 'IP地址',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    INDEX idx_phone_create_time (phone, create_time),
-    INDEX idx_create_time (create_time),
-    INDEX idx_send_time (send_time),
-    INDEX idx_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='短信发送记录表';
 
 -- [附录·短信] provider 迁移：aliyun → aliyunAuth
 UPDATE sys_config_group
@@ -2246,59 +2073,12 @@ FROM sys_role_menu rm
 WHERE rm.menu_id = 163;
 
 -- [附录·AI] add5：AI wu助手（sys_ai_model / sys_ai_chat_log + 「AI 管理」菜单，可重复执行）
-CREATE TABLE IF NOT EXISTS sys_ai_model (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '模型配置ID',
-    name VARCHAR(100) NOT NULL COMMENT '配置名称（展示用，如「DeepSeek 官方」）',
-    provider VARCHAR(32) NOT NULL COMMENT '供应商: deepseek/openai/qwen/kimi',
-    model_name VARCHAR(100) NOT NULL COMMENT '模型名称（如 deepseek-chat / qwen-plus）',
-    base_url VARCHAR(255) NOT NULL COMMENT 'API 基础地址（不含 /chat/completions）',
-    api_key VARCHAR(1024) DEFAULT '' COMMENT 'API 密钥（SM4-CBC 加密存储）',
-    temperature DECIMAL(3,2) DEFAULT 0.70 COMMENT '采样温度 0~2',
-    max_tokens INT DEFAULT 4096 COMMENT '单次回复最大 Token 数',
-    system_prompt VARCHAR(2000) DEFAULT NULL COMMENT '系统提示词（角色设定）',
-    is_default TINYINT DEFAULT 0 COMMENT '是否默认模型 0:否 1:是（全局唯一）',
-    status TINYINT DEFAULT 1 COMMENT '状态 0:禁用 1:启用',
-    remark VARCHAR(500) DEFAULT NULL COMMENT '备注',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    creator VARCHAR(64) DEFAULT '' COMMENT '创建者',
-    updater VARCHAR(64) DEFAULT '' COMMENT '更新者',
-    deleted TINYINT DEFAULT 0 COMMENT '是否删除',
-    INDEX idx_provider (provider),
-    INDEX idx_is_default (is_default)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 模型供应商配置表';
 
-CREATE TABLE IF NOT EXISTS sys_ai_chat_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '日志ID',
-    user_id BIGINT DEFAULT 0 COMMENT '提问用户ID',
-    username VARCHAR(64) DEFAULT '' COMMENT '提问用户名',
-    conversation_id VARCHAR(64) DEFAULT '' COMMENT '会话ID（前端生成，串联多轮对话）',
-    model_id BIGINT DEFAULT 0 COMMENT '模型配置ID',
-    provider VARCHAR(32) DEFAULT '' COMMENT '供应商',
-    model_name VARCHAR(100) DEFAULT '' COMMENT '模型名称',
-    question TEXT COMMENT '用户提问（脱敏后）',
-    answer MEDIUMTEXT COMMENT 'AI 回答',
-    prompt_tokens INT DEFAULT 0 COMMENT '提问 Token 消耗',
-    completion_tokens INT DEFAULT 0 COMMENT '回答 Token 消耗',
-    total_tokens INT DEFAULT 0 COMMENT '总 Token 消耗',
-    duration_ms BIGINT DEFAULT 0 COMMENT '耗时（毫秒）',
-    chat_status TINYINT DEFAULT 1 COMMENT '结果 1:成功 0:失败 2:用户中断',
-    error_msg VARCHAR(500) DEFAULT NULL COMMENT '失败原因',
-    source VARCHAR(20) DEFAULT 'pc' COMMENT '来源终端 pc/mobile',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    creator VARCHAR(64) DEFAULT '' COMMENT '创建者',
-    updater VARCHAR(64) DEFAULT '' COMMENT '更新者',
-    deleted TINYINT DEFAULT 0 COMMENT '是否删除',
-    INDEX idx_user_id (user_id),
-    INDEX idx_model_id (model_id),
-    INDEX idx_create_time (create_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 对话日志审计表';
 
 -- 菜单：顶级目录「AI 管理」（id=210）+ AI 模型配置 / AI 对话日志 + 按钮权限
 INSERT IGNORE INTO sys_menu (id, name, permission, type, sort, parent_id, path, icon, component, status) VALUES
-(210, 'AI 管理', '', 1, 8, 0, '/ai', 'MagicStick', '', 1),
-(200, 'AI 模型配置', 'system:ai-model:list', 2, 1, 210, '/ai/model', 'MagicStick', 'ai/model/index', 1),
+(210, 'AI 管理', '', 1, 8, 0, '/ai', 'Compass', '', 1),
+(200, 'AI 模型配置', 'system:ai-model:list', 2, 1, 210, '/ai/model', 'Operation', 'ai/model/index', 1),
 (207, 'AI模型查询', 'system:ai-model:query', 3, 1, 200, '', '', '', 1),
 (201, 'AI模型新增', 'system:ai-model:create', 3, 2, 200, '', '', '', 1),
 (202, 'AI模型修改', 'system:ai-model:update', 3, 3, 200, '', '', '', 1),
@@ -2321,25 +2101,9 @@ INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES
 (1, 210), (1, 200), (1, 207), (1, 201), (1, 202), (1, 203), (1, 204), (1, 205), (1, 208), (1, 206);
 
 -- [附录·AI] add7：AI 知识库（RAG-lite）表 + 菜单与权限 + 示例知识（可重复执行）
-CREATE TABLE IF NOT EXISTS sys_ai_knowledge (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '知识ID',
-    title VARCHAR(128) NOT NULL DEFAULT '' COMMENT '知识标题',
-    keywords VARCHAR(255) NOT NULL DEFAULT '' COMMENT '检索关键词(逗号分隔)',
-    content TEXT NOT NULL COMMENT '知识正文(Markdown)',
-    category VARCHAR(32) NOT NULL DEFAULT 'faq' COMMENT '分类: faq/manual/module/other',
-    sort INT NOT NULL DEFAULT 0 COMMENT '排序权重(大者优先)',
-    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态: 1启用 0停用',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    creator VARCHAR(64) DEFAULT '' COMMENT '创建者',
-    updater VARCHAR(64) DEFAULT '' COMMENT '更新者',
-    deleted TINYINT DEFAULT 0 COMMENT '是否删除',
-    INDEX idx_status_category (status, category),
-    FULLTEXT INDEX ft_knowledge (title, keywords, content) WITH PARSER ngram
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 知识库';
 
 INSERT IGNORE INTO sys_menu (id, name, permission, type, sort, parent_id, path, icon, component, status) VALUES
-(220, 'AI 知识库', 'system:ai-knowledge:list', 2, 3, 210, '/ai/knowledge', 'Notebook', 'ai/knowledge/index', 1),
+(220, 'AI 知识库', 'system:ai-knowledge:list', 2, 3, 210, '/ai/knowledge', 'Reading', 'ai/knowledge/index', 1),
 (224, 'AI知识查询', 'system:ai-knowledge:query', 3, 1, 220, '', '', '', 1),
 (221, 'AI知识新增', 'system:ai-knowledge:create', 3, 2, 220, '', '', '', 1),
 (222, 'AI知识修改', 'system:ai-knowledge:update', 3, 3, 220, '', '', '', 1),
@@ -2395,3 +2159,17 @@ SELECT role_id, 208 FROM sys_role_menu WHERE menu_id = 205;
 INSERT IGNORE INTO sys_role_menu (role_id, menu_id)
 SELECT role_id, 224 FROM sys_role_menu WHERE menu_id = 220;
 
+-- [附录·AI] add9：纠偏 AI 菜单图标（告别魔法棒：AI 管理使用 Compass，AI 模型配置使用 Cpu，AI 知识库固定使用图3 Notebook）
+UPDATE sys_menu SET icon = 'Compass' WHERE id = 210 AND (icon = 'MagicStick' OR icon = '' OR icon IS NULL);
+UPDATE sys_menu SET icon = 'Cpu' WHERE id = 200;
+UPDATE sys_menu SET icon = 'Reading' WHERE id = 220;
+
+-- [附录·菜单] add16：系统日志 Calendar、AI 模型配置 AiModel、服务监控 Odometer、安全风控 Lock、流程中心 Workflow，系统管理子菜单顺序重排
+UPDATE sys_menu SET icon = 'Calendar' WHERE id = 120 OR path = '/log';
+UPDATE sys_menu SET icon = 'AiModel' WHERE id = 200 OR path = '/ai/model';
+UPDATE sys_menu SET icon = 'Odometer' WHERE id = 187 OR path = '/monitor/server';
+UPDATE sys_menu SET icon = 'Lock' WHERE id IN (129, 230) OR path = '/system/security-log';
+UPDATE sys_menu SET icon = 'Workflow' WHERE id = 8 OR path = '/workflow';
+UPDATE sys_menu SET sort = 5 WHERE id = 130;
+UPDATE sys_menu SET sort = 6 WHERE id = 163;
+UPDATE sys_menu SET sort = 7 WHERE id = 160;

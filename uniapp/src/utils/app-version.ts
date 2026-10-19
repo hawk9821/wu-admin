@@ -8,5 +8,5 @@ export function getAppVersionName(): string {
   } catch {
     /* ignore */
   }
-  return '1.0.0'
+  return '1.1'
 }

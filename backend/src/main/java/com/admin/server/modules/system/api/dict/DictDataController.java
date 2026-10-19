@@ -1,5 +1,6 @@
 package com.admin.server.modules.system.api.dict;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
@@ -11,7 +12,6 @@ import com.admin.server.modules.system.framework.cache.DictCacheService;
 import com.admin.server.modules.system.service.dict.DictDataService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.annotation.Resource;
@@ -33,7 +33,7 @@ public class DictDataController {
 
     @PostMapping("/refresh-cache")
     @Operation(summary = "刷新字典 Redis 全量缓存")
-    @PreAuthorize("@ss.hasPermission('system:dict:list')")
+    @RequirePermission("system:dict:list")
     public CommonResult<Boolean> refreshCache() {
         dictCacheService.refreshAll();
         return CommonResult.success(true);
@@ -41,7 +41,7 @@ public class DictDataController {
 
     @GetMapping("/page")
     @Operation(summary = "字典数据分页")
-    @PreAuthorize("@ss.hasRead('system:dict:list')")
+    @RequirePermission(value = "system:dict:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<DictDataRespVO>> page(
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "10") Integer pageSize,
@@ -78,7 +78,7 @@ public class DictDataController {
 
     @GetMapping("/manage/{dictType}")
     @Operation(summary = "管理端按类型查询全部字典数据")
-    @PreAuthorize("@ss.hasRead('system:dict:list')")
+    @RequirePermission(value = "system:dict:list", type = RequirePermission.Type.READ)
     public CommonResult<List<DictDataRespVO>> listForManage(@PathVariable String dictType) {
         List<DictDataDO> list = dictDataService.listByDictTypeForManage(dictType);
         return CommonResult.success(BeanMappingUtils.copyListProperties(list, DictDataRespVO.class));
@@ -86,7 +86,7 @@ public class DictDataController {
 
     @GetMapping("/{id}")
     @Operation(summary = "字典数据详情")
-    @PreAuthorize("@ss.hasRead('system:dict:list')")
+    @RequirePermission(value = "system:dict:list", type = RequirePermission.Type.READ)
     public CommonResult<DictDataRespVO> detail(@PathVariable Long id) {
         DictDataDO dictData = dictDataService.getById(id);
         return CommonResult.success(BeanMappingUtils.copyProperties(dictData, DictDataRespVO.class));
@@ -94,7 +94,7 @@ public class DictDataController {
 
     @PostMapping
     @Operation(summary = "新增字典数据")
-    @PreAuthorize("@ss.hasPermission('system:dict:create')")
+    @RequirePermission("system:dict:create")
     @Log(title = "字典数据", businessType = Log.BusinessType.INSERT)
     public CommonResult<Boolean> create(@RequestBody DictDataDO dictData) {
         dictDataService.create(dictData);
@@ -103,7 +103,7 @@ public class DictDataController {
 
     @PutMapping
     @Operation(summary = "修改字典数据")
-    @PreAuthorize("@ss.hasPermission('system:dict:update')")
+    @RequirePermission("system:dict:update")
     @Log(title = "字典数据", businessType = Log.BusinessType.UPDATE)
     public CommonResult<Boolean> update(@RequestBody DictDataDO dictData) {
         dictDataService.update(dictData);
@@ -112,7 +112,7 @@ public class DictDataController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除字典数据")
-    @PreAuthorize("@ss.hasPermission('system:dict:delete')")
+    @RequirePermission("system:dict:delete")
     @Log(title = "字典数据", businessType = Log.BusinessType.DELETE)
     public CommonResult<Boolean> delete(@PathVariable Long id) {
         dictDataService.delete(id);
@@ -121,7 +121,7 @@ public class DictDataController {
 
     @GetMapping("/recycle/page")
     @Operation(summary = "字典数据回收站分页")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     public CommonResult<PageResult<DictDataRespVO>> recyclePage(PageParam pageParam,
             @RequestParam(required = false) String dictType,
             @RequestParam(required = false) String dictLabel) {
@@ -131,7 +131,7 @@ public class DictDataController {
 
     @PutMapping("/restore")
     @Operation(summary = "恢复字典数据")
-    @PreAuthorize("@ss.hasRecycleRestore('system:dict:delete')")
+    @RequirePermission(value = "system:dict:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     public CommonResult<Boolean> restore(@RequestParam Long id) {
         dictDataService.restore(id);
         return CommonResult.success(true);
@@ -139,7 +139,7 @@ public class DictDataController {
 
     @DeleteMapping("/delete-permanent")
     @Operation(summary = "彻底删除字典数据")
-    @PreAuthorize("@ss.hasRecycleDelete('system:dict:delete')")
+    @RequirePermission(value = "system:dict:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {
         dictDataService.deletePermanent(id);
         return CommonResult.success(true);

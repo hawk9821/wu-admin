@@ -1,5 +1,6 @@
 package com.admin.server.modules.infra.api.gen;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
@@ -14,7 +15,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -31,7 +31,7 @@ public class GenController {
 
     @GetMapping("/db/list")
     @Operation(summary = "可导入的数据库表")
-    @PreAuthorize("@ss.hasRead('tool:gen:list')")
+    @RequirePermission(value = "tool:gen:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<DatabaseTableVO>> dbTableList(
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "10") Integer pageSize,
@@ -42,7 +42,7 @@ public class GenController {
 
     @PostMapping("/import")
     @Operation(summary = "导入表结构")
-    @PreAuthorize("@ss.hasPermission('tool:gen:import')")
+    @RequirePermission("tool:gen:import")
     @Log(title = "代码生成", businessType = Log.BusinessType.INSERT)
     public CommonResult<Boolean> importTable(@RequestBody String[] tableNames) {
         genTableService.importTable(tableNames);
@@ -51,7 +51,7 @@ public class GenController {
 
     @GetMapping("/page")
     @Operation(summary = "已导入表分页")
-    @PreAuthorize("@ss.hasRead('tool:gen:list')")
+    @RequirePermission(value = "tool:gen:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<GenTableRespVO>> page(
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "10") Integer pageSize,
@@ -63,7 +63,7 @@ public class GenController {
 
     @GetMapping("/{id}")
     @Operation(summary = "表配置详情")
-    @PreAuthorize("@ss.hasRead('tool:gen:query')")
+    @RequirePermission(value = "tool:gen:query", type = RequirePermission.Type.READ)
     public CommonResult<GenTableRespVO> getInfo(@PathVariable Long id) {
         GenTableDO table = genTableService.getTableById(id);
         return CommonResult.success(GenTableConvert.convertGenTable(table));
@@ -71,7 +71,7 @@ public class GenController {
 
     @PutMapping
     @Operation(summary = "更新表配置")
-    @PreAuthorize("@ss.hasPermission('tool:gen:edit')")
+    @RequirePermission("tool:gen:edit")
     @Log(title = "代码生成", businessType = Log.BusinessType.UPDATE)
     public CommonResult<Boolean> update(@RequestBody GenTableDO table) {
         genTableService.updateTable(table);
@@ -80,7 +80,7 @@ public class GenController {
 
     @DeleteMapping("/{ids}")
     @Operation(summary = "删除表配置")
-    @PreAuthorize("@ss.hasPermission('tool:gen:remove')")
+    @RequirePermission("tool:gen:remove")
     @Log(title = "代码生成", businessType = Log.BusinessType.DELETE)
     public CommonResult<Boolean> remove(@PathVariable Long[] ids) {
         genTableService.deleteTable(ids);
@@ -89,14 +89,14 @@ public class GenController {
 
     @GetMapping("/preview/{id}")
     @Operation(summary = "预览代码")
-    @PreAuthorize("@ss.hasPermission('tool:gen:preview')")
+    @RequirePermission("tool:gen:preview")
     public CommonResult<Map<String, String>> preview(@PathVariable Long id) {
         return CommonResult.success(genTableService.previewCode(id));
     }
 
     @GetMapping("/download")
     @Operation(summary = "下载代码 ZIP")
-    @PreAuthorize("@ss.hasPermission('tool:gen:code')")
+    @RequirePermission("tool:gen:code")
     @Log(title = "代码生成", businessType = Log.BusinessType.EXPORT)
     public void download(@RequestParam Long[] ids, HttpServletResponse response) throws IOException {
         byte[] data = genTableService.generateCode(ids);
@@ -109,14 +109,14 @@ public class GenController {
 
     @GetMapping("/preview-generate/{id}")
     @Operation(summary = "预览将生成的文件")
-    @PreAuthorize("@ss.hasPermission('tool:gen:code')")
+    @RequirePermission("tool:gen:code")
     public CommonResult<List<String>> previewGenerateFiles(@PathVariable Long id) {
         return CommonResult.success(genTableService.previewGenerateFiles(id));
     }
 
     @PostMapping("/generate/{id}")
     @Operation(summary = "生成代码到项目")
-    @PreAuthorize("@ss.hasPermission('tool:gen:code')")
+    @RequirePermission("tool:gen:code")
     @Log(title = "代码生成", businessType = Log.BusinessType.INSERT)
     public CommonResult<List<String>> generateToProject(
             @PathVariable Long id,
@@ -126,14 +126,14 @@ public class GenController {
 
     @GetMapping("/preview-remove/{id}")
     @Operation(summary = "预览将移除的文件")
-    @PreAuthorize("@ss.hasPermission('tool:gen:code')")
+    @RequirePermission("tool:gen:code")
     public CommonResult<List<String>> previewRemoveFiles(@PathVariable Long id) {
         return CommonResult.success(genTableService.previewRemoveFiles(id));
     }
 
     @DeleteMapping("/remove-code/{id}")
     @Operation(summary = "移除已生成代码")
-    @PreAuthorize("@ss.hasPermission('tool:gen:code')")
+    @RequirePermission("tool:gen:code")
     @Log(title = "代码生成", businessType = Log.BusinessType.DELETE)
     public CommonResult<List<String>> removeGeneratedCode(@PathVariable Long id) {
         return CommonResult.success(genTableService.removeGeneratedCode(id));
@@ -141,7 +141,7 @@ public class GenController {
 
     @PostMapping("/sync/{id}")
     @Operation(summary = "同步表结构")
-    @PreAuthorize("@ss.hasPermission('tool:gen:edit')")
+    @RequirePermission("tool:gen:edit")
     @Log(title = "代码生成", businessType = Log.BusinessType.UPDATE)
     public CommonResult<Boolean> sync(@PathVariable Long id) {
         genTableService.syncTable(id);
@@ -150,7 +150,7 @@ public class GenController {
 
     @GetMapping("/recycle/page")
     @Operation(summary = "代码生成回收站分页")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     public CommonResult<PageResult<GenTableRespVO>> recyclePage(
             PageParam pageParam,
             @RequestParam(required = false) String tableName) {
@@ -160,7 +160,7 @@ public class GenController {
 
     @PutMapping("/restore")
     @Operation(summary = "恢复代码生成表配置")
-    @PreAuthorize("@ss.hasRecycleRestore('tool:gen:remove')")
+    @RequirePermission(value = "tool:gen:remove", type = RequirePermission.Type.RECYCLE_RESTORE)
     @Log(title = "代码生成", businessType = Log.BusinessType.UPDATE)
     public CommonResult<Boolean> restore(@RequestParam Long id) {
         genTableService.restore(id);
@@ -169,7 +169,7 @@ public class GenController {
 
     @DeleteMapping("/delete-permanent")
     @Operation(summary = "彻底删除代码生成表配置")
-    @PreAuthorize("@ss.hasRecycleDelete('tool:gen:remove')")
+    @RequirePermission(value = "tool:gen:remove", type = RequirePermission.Type.RECYCLE_DELETE)
     @Log(title = "代码生成", businessType = Log.BusinessType.DELETE)
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {
         genTableService.deletePermanent(id);

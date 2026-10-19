@@ -299,7 +299,7 @@ const PROVIDER_META: Record<string, { label: string; short: string; color: strin
     bg: 'rgba(77, 107, 254, 0.12)',
     baseUrl: 'https://api.deepseek.com/v1',
     portalUrl: 'https://platform.deepseek.com',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    models: ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash'],
   },
   openai: {
     label: 'OpenAI',
@@ -308,7 +308,7 @@ const PROVIDER_META: Record<string, { label: string; short: string; color: strin
     bg: 'rgba(16, 163, 127, 0.12)',
     baseUrl: 'https://api.openai.com/v1',
     portalUrl: 'https://platform.openai.com',
-    models: ['gpt-4o', 'gpt-4o-mini'],
+    models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'o1', 'o1-mini'],
   },
   qwen: {
     label: '通义千问',
@@ -317,7 +317,7 @@ const PROVIDER_META: Record<string, { label: string; short: string; color: strin
     bg: 'rgba(97, 92, 237, 0.12)',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     portalUrl: 'https://modelstudio.console.alibabacloud.com',
-    models: ['qwen3.7-plus', 'qwen3.7-max', 'qwen3.6-plus'],
+    models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-long'],
   },
   kimi: {
     label: 'Kimi',
@@ -326,7 +326,7 @@ const PROVIDER_META: Record<string, { label: string; short: string; color: strin
     bg: 'rgba(15, 23, 42, 0.08)',
     baseUrl: 'https://api.moonshot.cn/v1',
     portalUrl: 'https://platform.moonshot.cn',
-    models: ['kimi-k2.7-code', 'kimi-k2.6'],
+    models: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6'],
   },
 }
 
@@ -396,7 +396,7 @@ const defaultForm = (): AiModelSaveDTO & { temperature: number; maxTokens: numbe
   id: undefined,
   name: '',
   provider: 'deepseek',
-  modelName: 'deepseek-v4-flash',
+  modelName: PROVIDER_META.deepseek.models[0] || 'deepseek-flash',
   baseUrl: PROVIDER_META.deepseek.baseUrl,
   apiKey: '',
   temperature: 0.7,

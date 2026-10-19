@@ -21,6 +21,7 @@ import com.admin.server.modules.ticket.service.approval.ApprovalFormService;
 import com.admin.server.modules.ticket.service.approval.RegisterApprovalService;
 import com.admin.server.modules.system.service.config.SystemConfigHelper;
 import com.admin.server.modules.system.service.notice.NoticeService;
+import com.admin.server.modules.system.service.permission.DataScopeService;
 import com.admin.server.modules.system.service.permission.PermissionService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -47,6 +48,8 @@ public class ApprovalFormServiceImpl implements ApprovalFormService {
     @Resource
     private PermissionService permissionService;
     @Resource
+    private DataScopeService dataScopeService;
+    @Resource
     private RegisterApprovalService registerApprovalService;
     @Resource
     private SystemConfigHelper systemConfigHelper;
@@ -55,8 +58,6 @@ public class ApprovalFormServiceImpl implements ApprovalFormService {
 
     @Override
     public PageResult<ApprovalFormDO> page(PageParam pageParam, String title, String formType, String status, Long userId) {
-        boolean canQueryAll = permissionService.hasRole(userId, "super_admin")
-                || permissionService.hasPermission(userId, "system:approval:query");
         LambdaQueryWrapper<ApprovalFormDO> wrapper = new LambdaQueryWrapper<>();
         if (title != null && !title.isEmpty()) {
             wrapper.like(ApprovalFormDO::getTitle, title);
@@ -67,10 +68,19 @@ public class ApprovalFormServiceImpl implements ApprovalFormService {
         if (status != null && !status.isEmpty()) {
             wrapper.eq(ApprovalFormDO::getStatus, status);
         }
-        if (!canQueryAll) {
-            wrapper.and(w -> w.eq(ApprovalFormDO::getApplicantUserId, userId)
-                    .or()
-                    .eq(ApprovalFormDO::getApproverUserId, userId));
+        // 组织隔离：按申请人/审批人所属部门的数据范围过滤
+        DataScopeService.DataScopeContext scope = dataScopeService.getCurrentScope();
+        if (!scope.all()) {
+            if (scope.selfOnly()) {
+                wrapper.and(w -> w.eq(ApprovalFormDO::getApplicantUserId, userId)
+                        .or()
+                        .eq(ApprovalFormDO::getApproverUserId, userId));
+            } else {
+                String visibleUsersSql = dataScopeService.visibleUserIdsSql();
+                wrapper.and(w -> w.inSql(ApprovalFormDO::getApplicantUserId, visibleUsersSql)
+                        .or()
+                        .inSql(ApprovalFormDO::getApproverUserId, visibleUsersSql));
+            }
         }
         wrapper.orderByDesc(ApprovalFormDO::getCreateTime);
         Page<ApprovalFormDO> page = approvalFormMapper.selectPage(
@@ -85,6 +95,9 @@ public class ApprovalFormServiceImpl implements ApprovalFormService {
         if (form == null) {
             throw new BusinessException(404, "审批单不存在");
         }
+        if (!isFormVisible(form)) {
+            throw new BusinessException(403, "无权查看该审批单");
+        }
         fillUserName(Collections.singletonList(form));
         return form;
     }
@@ -92,6 +105,12 @@ public class ApprovalFormServiceImpl implements ApprovalFormService {
     @Override
     public List<ApprovalRecordDO> recordList(Long formId) {
         ApprovalFormDO form = approvalFormMapper.selectById(formId);
+        if (form == null) {
+            throw new BusinessException(404, "审批单不存在");
+        }
+        if (!isFormVisible(form)) {
+            throw new BusinessException(403, "无权查看该审批单");
+        }
         List<ApprovalRecordDO> records = approvalRecordMapper.selectList(new LambdaQueryWrapper<ApprovalRecordDO>()
                 .eq(ApprovalRecordDO::getFormId, formId)
                 .orderByAsc(ApprovalRecordDO::getCreateTime));
@@ -216,6 +235,9 @@ public class ApprovalFormServiceImpl implements ApprovalFormService {
         if (form == null) {
             throw new BusinessException(404, "审批单不存在");
         }
+        if (!isFormVisible(form)) {
+            throw new BusinessException(403, "无权删除该审批单");
+        }
         approvalRecordMapper.delete(new LambdaQueryWrapper<ApprovalRecordDO>()
                 .eq(ApprovalRecordDO::getFormId, id));
         deleteRelatedNotices(id, false);
@@ -225,13 +247,33 @@ public class ApprovalFormServiceImpl implements ApprovalFormService {
     @Override
     public PageResult<ApprovalFormDO> recyclePage(PageParam pageParam, String title, String formType, String status) {
         Page<ApprovalFormDO> page = new Page<>(pageParam.getPageNo(), pageParam.getPageSize());
-        Page<ApprovalFormDO> deletedPage = (Page<ApprovalFormDO>) approvalFormMapper.selectDeletedPage(page, title, formType, status);
+        DataScopeService.DataScopeContext scope = dataScopeService.getCurrentScope();
+        List<Long> deptIds = null;
+        boolean selfOnly = false;
+        Long currentUserId = null;
+        if (!scope.all()) {
+            if (scope.selfOnly()) {
+                selfOnly = true;
+                currentUserId = SecurityUtils.getLoginUserId();
+            } else {
+                deptIds = scope.deptIds();
+            }
+        }
+        Page<ApprovalFormDO> deletedPage = (Page<ApprovalFormDO>) approvalFormMapper.selectDeletedPage(
+                page, title, formType, status, deptIds, selfOnly, currentUserId);
         fillUserName(deletedPage.getRecords());
         return PageResult.of(deletedPage.getRecords(), deletedPage.getTotal());
     }
 
     @Override
     public void restore(Long id) {
+        ApprovalFormDO deleted = approvalFormMapper.selectDeletedById(id);
+        if (deleted == null) {
+            throw new BusinessException(404, "回收站审批单不存在");
+        }
+        if (!isFormVisible(deleted)) {
+            throw new BusinessException(403, "无权恢复该审批单");
+        }
         int rows = approvalFormMapper.restoreById(id);
         if (rows == 0) {
             throw new BusinessException(404, "回收站审批单不存在");
@@ -241,12 +283,40 @@ public class ApprovalFormServiceImpl implements ApprovalFormService {
 
     @Override
     public void deletePermanent(Long id) {
+        ApprovalFormDO deleted = approvalFormMapper.selectDeletedById(id);
+        if (deleted == null) {
+            throw new BusinessException(404, "回收站审批单不存在");
+        }
+        if (!isFormVisible(deleted)) {
+            throw new BusinessException(403, "无权删除该审批单");
+        }
         approvalRecordMapper.deletePhysicalByFormId(id);
         deleteRelatedNotices(id, true);
         int rows = approvalFormMapper.deletePhysicalById(id);
         if (rows == 0) {
             throw new BusinessException(404, "回收站审批单不存在");
         }
+    }
+
+    /**
+     * 审批单可见性：超管全部可见；仅本人范围看自己申请或审批的单；其余按申请人/审批人所在部门范围判断。
+     */
+    private boolean isFormVisible(ApprovalFormDO form) {
+        if (form == null) {
+            return false;
+        }
+        DataScopeService.DataScopeContext scope = dataScopeService.getCurrentScope();
+        if (scope.all()) {
+            return true;
+        }
+        Long currentUserId = SecurityUtils.getLoginUserId();
+        if (scope.selfOnly()) {
+            return currentUserId != null
+                    && (currentUserId.equals(form.getApplicantUserId())
+                    || currentUserId.equals(form.getApproverUserId()));
+        }
+        return dataScopeService.isUserVisible(form.getApplicantUserId())
+                || dataScopeService.isUserVisible(form.getApproverUserId());
     }
 
     private String generateFormNo() {

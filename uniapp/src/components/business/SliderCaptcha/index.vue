@@ -6,11 +6,20 @@
         <text class="slider-panel__close" @click="onClose">×</text>
       </view>
 
-      <view class="slider-panel__image">
-        <image :src="currentBgUrl" class="slider-panel__bg" mode="aspectFill" @load="measure" />
-        <view class="slider-panel__slot" :style="puzzleBoxStyle(targetX)" />
-        <view class="slider-panel__piece" :class="{ verified }" :style="puzzleBoxStyle(offsetX)">
-          <image :src="currentBgUrl" class="slider-panel__piece-img" mode="aspectFill" :style="pieceImgStyle" />
+      <view class="slider-panel__image" :style="{ height: imageHeightPx + 'px' }">
+        <template v-if="challenge">
+          <image
+            :src="challenge.background"
+            class="slider-panel__bg"
+            mode="scaleToFill"
+            @load="measure"
+          />
+          <view class="slider-panel__piece" :class="{ verified }" :style="pieceStyle">
+            <image :src="challenge.piece" class="slider-panel__piece-img" mode="scaleToFill" />
+          </view>
+        </template>
+        <view v-else class="slider-panel__loading">
+          <text>加载中…</text>
         </view>
       </view>
 
@@ -25,12 +34,9 @@
         </view>
         <view
           class="slider-panel__handle"
-          :class="{ dragging, verified }"
+          :class="{ dragging, verified, disabled: verifying || loadingChallenge }"
           :style="{ left: `${offsetX}px` }"
           @touchstart.stop.prevent="onDragStart"
-          @touchmove.stop.prevent="onDragMove"
-          @touchend.stop="onDragEnd"
-          @touchcancel.stop="onDragEnd"
         >
           <text v-if="!verified">›</text>
           <text v-else>✓</text>
@@ -46,9 +52,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { getSliderChallenge } from '@/api/system/auth'
-import type { SliderVerifyPayload } from '@/utils/slider-captcha'
+import { ref, computed, watch, nextTick } from 'vue'
+import { getSliderChallenge, verifySlider } from '@/api/system/auth'
+import type { SliderChallengeResult } from '@/api/system/auth'
+import type { SliderTrackEvent, SliderVerifyPayload } from '@/utils/slider-captcha'
 
 const props = withDefaults(
   defineProps<{
@@ -63,79 +70,84 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const PIECE_W = 52
-const PIECE_H = 52
-const IMAGE_H = 200
-const TOLERANCE = 6
-const PUZZLE_CLIP = 'polygon(0% 0%, 78% 0%, 78% 28%, 100% 50%, 78% 72%, 78% 100%, 0% 100%)'
+const MAX_TRACK_EVENTS = 240
 
-const BG_URLS = [
-  '/static/captcha/bg1.jpg',
-  '/static/captcha/bg2.jpg',
-  '/static/captcha/bg3.jpg',
-  '/static/captcha/bg4.jpg',
-]
-
-const imageWidth = ref(340)
+const challenge = ref<SliderChallengeResult | null>(null)
+const displayWidth = ref(340)
 const offsetX = ref(0)
-const targetX = ref(180)
-const pieceTop = ref(74)
-const maxOffset = ref(280)
 const dragging = ref(false)
+const verifying = ref(false)
 const verified = ref(false)
-const bgIndex = ref(0)
-const challengeToken = ref('')
+const loadingChallenge = ref(false)
+
 let dragStartX = 0
+let dragStartTime = 0
+let lastY = 0
+let events: SliderTrackEvent[] = []
 
-const currentBgUrl = computed(() => BG_URLS[bgIndex.value % BG_URLS.length])
+const displayScale = computed(() => {
+  const width = challenge.value?.width || 340
+  return displayWidth.value > 0 ? displayWidth.value / width : 1
+})
 
-function puzzleBoxStyle(left: number) {
+const pieceDisplaySize = computed(() => {
+  const size = challenge.value?.pieceSize || 52
+  return Math.max(1, Math.round(size * displayScale.value))
+})
+
+const maxOffset = computed(() => Math.max(0, displayWidth.value - pieceDisplaySize.value))
+
+const imageHeightPx = computed(() => {
+  const width = challenge.value?.width || 340
+  const height = challenge.value?.height || 200
+  return Math.max(1, Math.round(displayWidth.value * height / width))
+})
+
+const pieceStyle = computed(() => {
+  const top = challenge.value?.pieceTop || 0
   return {
-    left: `${left}px`,
-    top: `${pieceTop.value}px`,
-    width: `${PIECE_W}px`,
-    height: `${PIECE_H}px`,
-    clipPath: PUZZLE_CLIP,
+    left: `${offsetX.value}px`,
+    top: `${Math.round(top * displayScale.value)}px`,
+    width: `${pieceDisplaySize.value}px`,
+    height: `${pieceDisplaySize.value}px`,
   }
-}
-
-const pieceImgStyle = computed(() => ({
-  width: `${imageWidth.value}px`,
-  height: `${IMAGE_H}px`,
-  transform: `translate3d(${-targetX.value}px, ${-pieceTop.value}px, 0)`,
-}))
+})
 
 function measure() {
-  uni.createSelectorQuery()
-    .select('.slider-panel__image')
-    .boundingClientRect((rect) => {
-      const box = Array.isArray(rect) ? rect[0] : rect
-      if (box && 'width' in box && box.width) {
-        imageWidth.value = box.width
-        maxOffset.value = Math.max(PIECE_W, box.width - PIECE_W)
-        if (targetX.value > maxOffset.value - PIECE_W) {
-          targetX.value = Math.max(0, maxOffset.value - PIECE_W)
+  nextTick(() => {
+    uni.createSelectorQuery()
+      .select('.slider-panel__image')
+      .boundingClientRect((rect) => {
+        const box = Array.isArray(rect) ? rect[0] : rect
+        if (box && 'width' in box && box.width) {
+          displayWidth.value = box.width
         }
-      }
-    })
-    .exec()
+      })
+      .exec()
+  })
 }
 
 async function refresh() {
+  if (verifying.value) return
   offsetX.value = 0
   verified.value = false
   dragging.value = false
+  events = []
+  loadingChallenge.value = true
   try {
     const res = await getSliderChallenge(props.scene)
     const data = res.data
-    challengeToken.value = data.token
-    bgIndex.value = data.bgIndex ?? 0
-    pieceTop.value = data.pieceTop ?? 74
-    targetX.value = data.targetX ?? 180
+    if (!data?.token || !data.background || !data.piece) {
+      throw new Error('滑块挑战数据不完整')
+    }
+    challenge.value = data
+    await nextTick()
     measure()
   } catch {
-    challengeToken.value = ''
+    challenge.value = null
     uni.showToast({ title: '加载滑块验证失败', icon: 'none' })
+  } finally {
+    loadingChallenge.value = false
   }
 }
 
@@ -152,43 +164,100 @@ function getClientX(e: TouchEvent) {
   return e.touches[0]?.clientX ?? e.changedTouches[0]?.clientX ?? 0
 }
 
+function getClientY(e: TouchEvent) {
+  return e.touches[0]?.clientY ?? e.changedTouches[0]?.clientY ?? 0
+}
+
 function onDragStart(e: TouchEvent) {
-  if (verified.value || !challengeToken.value) return
+  if (verified.value || verifying.value || loadingChallenge.value || !challenge.value) return
   dragging.value = true
-  dragStartX = getClientX(e) - offsetX.value
+  const clientX = getClientX(e)
+  dragStartX = clientX - offsetX.value
+  dragStartTime = Date.now()
+  const query = uni.createSelectorQuery().select('.slider-panel__image')
+  query.boundingClientRect((rect) => {
+    const box = Array.isArray(rect) ? rect[0] : rect
+    if (box && 'top' in box && typeof box.top === 'number') {
+      lastY = Math.round((getClientY(e) - box.top) / displayScale.value)
+    }
+  }).exec()
+  events = [{ x: Math.round(offsetX.value / displayScale.value), y: lastY, t: 0 }]
 }
 
 function onDragMove(e: TouchEvent) {
   if (!dragging.value || verified.value) return
   offsetX.value = clampX(getClientX(e) - dragStartX)
+  if (events.length < MAX_TRACK_EVENTS) {
+    events.push({
+      x: Math.round(offsetX.value / displayScale.value),
+      y: lastY,
+      t: Date.now() - dragStartTime,
+    })
+  }
 }
 
-function onDragEnd() {
+async function onDragEnd() {
   if (!dragging.value || verified.value) return
   dragging.value = false
-  if (Math.abs(offsetX.value - targetX.value) <= TOLERANCE) {
-    verified.value = true
-    offsetX.value = targetX.value
-    if (!challengeToken.value) {
-      uni.showToast({ title: '验证数据无效', icon: 'none' })
-      return
+
+  if (!challenge.value) return
+  if (offsetX.value < 2) {
+    offsetX.value = 0
+    events = []
+    return
+  }
+  if (verifying.value) return
+
+  const durationMs = Date.now() - dragStartTime
+  const serverOffsetX = Math.round(offsetX.value / displayScale.value)
+  events.push({
+    x: serverOffsetX,
+    y: lastY,
+    t: durationMs,
+  })
+  // 轨迹点达到上限时保留最后一个终点，服务端会校验“最后一点与提交偏移量一致”，
+  // 直接截断会把终点丢掉，长距离拖动会稳定失败。
+  const track = events.length > MAX_TRACK_EVENTS
+    ? [...events.slice(0, MAX_TRACK_EVENTS - 1), events[events.length - 1]]
+    : events
+
+  verifying.value = true
+  try {
+    const res = await verifySlider({
+      token: challenge.value.token,
+      offsetX: serverOffsetX,
+      durationMs,
+      events: track,
+    })
+    const ticket = res.data?.ticket
+    if (!ticket) {
+      throw new Error('服务端未返回验证票据')
     }
+    verified.value = true
     uni.showToast({ title: '验证成功', icon: 'success' })
-    const payload: SliderVerifyPayload = { token: challengeToken.value, offsetX: offsetX.value }
     setTimeout(() => {
       show.value = false
-      emit('success', payload)
+      emit('success', { token: ticket, offsetX: serverOffsetX })
     }, 450)
-  } else {
-    uni.showToast({ title: '验证失败，请重试', icon: 'none' })
-    setTimeout(() => {
-      offsetX.value = 0
-    }, 280)
+  } catch (error) {
+    const message = (error as { message?: string })?.message || ''
+    if (!message) {
+      uni.showToast({ title: '验证失败，请重试', icon: 'none' })
+    }
+    offsetX.value = 0
+    events = []
+    if (message.includes('刷新') || message.includes('过期') || message.includes('次数过多')) {
+      await refresh()
+    }
+  } finally {
+    verifying.value = false
   }
 }
 
 watch(show, (v) => {
-  if (v) refresh()
+  if (v) {
+    void refresh()
+  }
 })
 </script>
 
@@ -232,7 +301,6 @@ watch(show, (v) => {
 .slider-panel__image {
   position: relative;
   width: 100%;
-  height: 400rpx;
   overflow: hidden;
   border-radius: 4rpx;
   background: #374151;
@@ -243,11 +311,13 @@ watch(show, (v) => {
   height: 100%;
 }
 
-.slider-panel__slot {
-  position: absolute;
-  background: rgba(0, 0, 0, 0.5);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
-  z-index: 1;
+.slider-panel__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #d1d5db;
+  font-size: 26rpx;
 }
 
 .slider-panel__piece {
@@ -262,10 +332,8 @@ watch(show, (v) => {
 }
 
 .slider-panel__piece-img {
-  position: absolute;
-  top: 0;
-  left: 0;
-  max-width: none;
+  width: 100%;
+  height: 100%;
 }
 
 .slider-panel__track {
@@ -315,6 +383,10 @@ watch(show, (v) => {
     background: #22c55e;
     border-color: #22c55e;
     color: #fff;
+  }
+
+  &.disabled {
+    opacity: 0.65;
   }
 }
 

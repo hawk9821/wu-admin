@@ -1,5 +1,6 @@
 package com.admin.server.modules.system.api.user;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.framework.log.annotation.Log;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
@@ -13,7 +14,6 @@ import com.admin.server.modules.system.dal.dataobject.user.UserDO;
 import com.admin.server.modules.system.service.user.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,7 +31,7 @@ public class UserController {
 
     @Operation(summary = "获取用户列表")
     @GetMapping("/list")
-    @PreAuthorize("@ss.hasRead('system:user:list')")
+    @RequirePermission(value = "system:user:list", type = RequirePermission.Type.READ)
     public CommonResult<List<UserRespVO>> list() {
         List<UserDO> list = userService.listAll();
         return CommonResult.success(BeanMappingUtils.copyListProperties(list, UserRespVO.class));
@@ -39,7 +39,7 @@ public class UserController {
 
     @Operation(summary = "获取用户分页")
     @GetMapping("/page")
-    @PreAuthorize("@ss.hasRead('system:user:list')")
+    @RequirePermission(value = "system:user:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<UserRespVO>> page(PageParam pageParam,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String username,
@@ -54,7 +54,7 @@ public class UserController {
 
     @Operation(summary = "获取用户详情")
     @GetMapping("/get")
-    @PreAuthorize("@ss.hasPermission('system:user:query')")
+    @RequirePermission("system:user:query")
     public CommonResult<UserRespVO> get(@RequestParam Long id) {
         UserDO user = userService.getDetail(id);
         return CommonResult.success(BeanMappingUtils.copyProperties(user, UserRespVO.class));
@@ -63,7 +63,7 @@ public class UserController {
     @Log(title = "用户管理", businessType = Log.BusinessType.INSERT, isSaveRequestData = false)
     @Operation(summary = "新增用户")
     @PostMapping("/create")
-    @PreAuthorize("@ss.hasPermission('system:user:create')")
+    @RequirePermission("system:user:create")
     public CommonResult<Long> create(@Validated @RequestBody UserCreateReqVO reqVO) {
         return CommonResult.success(userService.createUser(reqVO));
     }
@@ -71,7 +71,7 @@ public class UserController {
     @Log(title = "用户管理", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "修改用户")
     @PutMapping("/update")
-    @PreAuthorize("@ss.hasPermission('system:user:update')")
+    @RequirePermission("system:user:update")
     public CommonResult<Boolean> update(@Validated @RequestBody UserUpdateReqVO reqVO) {
         userService.updateUser(reqVO);
         return CommonResult.success(true);
@@ -80,7 +80,7 @@ public class UserController {
     @Log(title = "用户管理", businessType = Log.BusinessType.DELETE)
     @Operation(summary = "删除用户")
     @DeleteMapping("/delete")
-    @PreAuthorize("@ss.hasPermission('system:user:delete')")
+    @RequirePermission("system:user:delete")
     public CommonResult<Boolean> delete(@RequestParam Long id) {
         userService.deleteUser(id);
         return CommonResult.success(true);
@@ -88,7 +88,7 @@ public class UserController {
 
     @Operation(summary = "用户回收站分页")
     @GetMapping("/recycle/page")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     public CommonResult<PageResult<UserRespVO>> recyclePage(PageParam pageParam,
             @RequestParam(required = false) String username,
             @RequestParam(required = false) String mobile,
@@ -100,7 +100,7 @@ public class UserController {
 
     @Operation(summary = "恢复用户")
     @PutMapping("/restore")
-    @PreAuthorize("@ss.hasRecycleRestore('system:user:delete')")
+    @RequirePermission(value = "system:user:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     public CommonResult<Boolean> restore(@RequestParam Long id) {
         userService.restore(id);
         return CommonResult.success(true);
@@ -108,7 +108,7 @@ public class UserController {
 
     @Operation(summary = "彻底删除用户")
     @DeleteMapping("/delete-permanent")
-    @PreAuthorize("@ss.hasRecycleDelete('system:user:delete')")
+    @RequirePermission(value = "system:user:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {
         userService.deletePermanent(id);
         return CommonResult.success(true);
@@ -116,14 +116,14 @@ public class UserController {
 
     @Operation(summary = "获取用户角色列表")
     @GetMapping("/get-role-ids")
-    @PreAuthorize("@ss.hasPermission('system:user:query')")
+    @RequirePermission("system:user:query")
     public CommonResult<Set<Long>> getRoleIds(@RequestParam Long userId) {
         return CommonResult.success(userService.getRoleIds(userId));
     }
 
     @Operation(summary = "分配用户角色")
     @PostMapping("/assign-role")
-    @PreAuthorize("@ss.hasPermission('system:user:update')")
+    @RequirePermission("system:user:update")
     public CommonResult<Boolean> assignRole(@Validated @RequestBody AssignRoleReqVO reqVO) {
         userService.assignRole(reqVO);
         return CommonResult.success(true);
@@ -131,7 +131,7 @@ public class UserController {
 
     @Operation(summary = "更新用户状态")
     @PutMapping("/update-status")
-    @PreAuthorize("@ss.hasPermission('system:user:update')")
+    @RequirePermission("system:user:update")
     public CommonResult<Boolean> updateStatus(@RequestParam Long id, @RequestParam Integer status) {
         userService.updateStatus(id, status);
         return CommonResult.success(true);
@@ -140,7 +140,7 @@ public class UserController {
     @Operation(summary = "重置用户密码")
     @Log(title = "用户管理", businessType = Log.BusinessType.UPDATE, isSaveRequestData = false, isSaveResponseData = false)
     @PutMapping("/reset-password")
-    @PreAuthorize("@ss.hasPermission('system:user:update')")
+    @RequirePermission("system:user:update")
     public CommonResult<Boolean> resetPassword(@RequestParam Long id, @RequestParam String password) {
         userService.resetPassword(id, password);
         return CommonResult.success(true);
@@ -149,7 +149,7 @@ public class UserController {
     @Log(title = "用户管理", businessType = Log.BusinessType.UPDATE, isSaveRequestData = false)
     @Operation(summary = "解除登录失败锁定")
     @PutMapping("/unlock-login")
-    @PreAuthorize("@ss.hasPermission('system:user:update')")
+    @RequirePermission("system:user:update")
     public CommonResult<Boolean> unlockLogin(@RequestParam Long id) {
         userService.unlockLogin(id);
         return CommonResult.success(true);
@@ -157,7 +157,7 @@ public class UserController {
 
     @Operation(summary = "踢用户下线")
     @DeleteMapping("/kick-out")
-    @PreAuthorize("@ss.hasPermission('system:user:update')")
+    @RequirePermission("system:user:update")
     public CommonResult<Boolean> kickOut(@RequestParam Long id) {
         userService.kickOut(id);
         return CommonResult.success(true);

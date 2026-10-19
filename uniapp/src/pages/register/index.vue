@@ -63,6 +63,7 @@ import AuthFooterLink from '@/components/business/AuthFooterLink/index.vue'
 import { toCaptchaDataUrl } from '@/utils/captcha'
 import { navigateToLogin } from '@/utils/auth-route'
 import { useH5PageHead } from '@/composables/useH5PageHead'
+import { encryptSm2 } from '@/utils/crypto'
 
 useH5PageHead('注册')
 
@@ -132,7 +133,7 @@ async function doRegister(sliderCaptcha?: { uuid: string; code: string }) {
   try {
     const payload: Parameters<typeof register>[0] = {
       username,
-      password: form.password,
+      password: encryptSm2(form.password),
       nickname: form.nickname.trim() || undefined,
       mobile: form.mobile.trim() || undefined,
     }

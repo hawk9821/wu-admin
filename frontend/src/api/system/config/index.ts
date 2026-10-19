@@ -29,6 +29,18 @@ export function updateConfigGroup(groupCode: string, configValue: string) {
   return put(`/system/config-group/${groupCode}`, { configValue })
 }
 
+export function getStorageConfig() {
+  return get<import('@/types/config').StorageConfigVO>('/system/config-group/storage')
+}
+
+export function updateStorageConfig(data: import('@/types/config').StorageConfigDTO) {
+  return put<boolean>('/system/config-group/storage', data)
+}
+
+export function testStorageConfig(data: import('@/types/config').StorageConfigDTO) {
+  return post<boolean>('/system/config-group/test-storage', data)
+}
+
 export function testPayment(type: 'wechat' | 'alipay') {
   return post<TestPaymentResult>('/system/config-group/test-payment', { type })
 }

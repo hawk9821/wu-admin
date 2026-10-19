@@ -4,6 +4,7 @@ import com.admin.server.modules.system.dal.dataobject.loginlog.LoginLogDO;
 import com.admin.server.modules.infra.dal.dataobject.monitor.ApiAccessLogDO;
 import com.admin.server.modules.infra.dal.dataobject.operlog.OperLogDO;
 import com.admin.server.modules.system.dal.mysql.loginlog.LoginLogMapper;
+import com.admin.server.modules.system.dal.mysql.security.SecurityEventMapper;
 import com.admin.server.modules.infra.dal.mysql.monitor.ApiAccessLogMapper;
 import com.admin.server.modules.infra.dal.mysql.operlog.OperLogMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -30,18 +31,24 @@ public class LogRetentionTask {
     @Value("${app.log.retention.api-access-log-days:30}")
     private int apiAccessLogDays;
 
+    @Value("${app.log.retention.security-event-days:90}")
+    private int securityEventDays;
+
     @Resource
     private OperLogMapper operLogMapper;
     @Resource
     private LoginLogMapper loginLogMapper;
     @Resource
     private ApiAccessLogMapper apiAccessLogMapper;
+    @Resource
+    private SecurityEventMapper securityEventMapper;
 
     /** 由 Quartz 定时任务 systemJobTask.purgeExpiredLogs 调用；也可在管理端手动执行 */
     public void purgeExpiredLogs() {
         purgeOperLogs();
         purgeLoginLogs();
         purgeApiAccessLogs();
+        purgeSecurityEvents();
     }
 
     private void purgeOperLogs() {
@@ -77,6 +84,17 @@ public class LogRetentionTask {
                 .lt(ApiAccessLogDO::getStartTime, cutoff));
         if (removed > 0) {
             log.info("API 访问日志归档清理：删除 {} 条（早于 {}）", removed, cutoff);
+        }
+    }
+
+    private void purgeSecurityEvents() {
+        if (securityEventDays <= 0) {
+            return;
+        }
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(securityEventDays);
+        int removed = securityEventMapper.deleteOlderThan(cutoff);
+        if (removed > 0) {
+            log.info("安全风控事件清理：删除 {} 条（早于 {}）", removed, cutoff);
         }
     }
 }

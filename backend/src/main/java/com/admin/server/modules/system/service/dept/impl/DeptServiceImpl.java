@@ -9,6 +9,7 @@ import com.admin.server.modules.system.dal.dataobject.user.UserDO;
 import com.admin.server.modules.system.dal.mysql.dept.DeptMapper;
 import com.admin.server.modules.system.dal.mysql.user.UserMapper;
 import com.admin.server.modules.system.service.dept.DeptService;
+import com.admin.server.modules.system.service.permission.DataScopeService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -35,10 +36,14 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
 
     @Resource
     private UserMapper userMapper;
+    @Resource
+    private DataScopeService dataScopeService;
 
     @Override
     public List<DeptDO> tree(String name, Integer status) {
         LambdaQueryWrapper<DeptDO> wrapper = new LambdaQueryWrapper<>();
+        // 组织隔离：仅展示当前角色数据范围内的部门
+        dataScopeService.applyDeptScope(wrapper);
         wrapper.like(StringUtils.hasText(name), DeptDO::getName, name)
                 .eq(status != null, DeptDO::getStatus, status)
                 .orderByAsc(DeptDO::getSort);
@@ -50,14 +55,18 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
 
     @Override
     public List<DeptDO> listAll() {
-        return list(new LambdaQueryWrapper<DeptDO>().orderByAsc(DeptDO::getSort));
+        LambdaQueryWrapper<DeptDO> wrapper = new LambdaQueryWrapper<>();
+        dataScopeService.applyDeptScope(wrapper);
+        return list(wrapper.orderByAsc(DeptDO::getSort));
     }
 
     @Override
     public DeptDO getById(Long id) {
-        DeptDO dept = super.getById(id);
+        LambdaQueryWrapper<DeptDO> wrapper = new LambdaQueryWrapper<DeptDO>().eq(DeptDO::getId, id);
+        dataScopeService.applyDeptScope(wrapper);
+        DeptDO dept = getOne(wrapper);
         if (dept == null) {
-            throw new BusinessException(404, "部门不存在");
+            throw new BusinessException(404, "部门不存在或无权查看");
         }
         fillLeaderNames(List.of(dept));
         return dept;
@@ -66,6 +75,7 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
     @Override
     public void create(DeptDO dept) {
         Long parentId = dept.getParentId() == null ? 0L : dept.getParentId();
+        requireVisibleParent(parentId);
         dept.setParentId(parentId);
         if (parentId == 0L) {
             dept.setAncestors("0");
@@ -86,11 +96,8 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void update(DeptDO dept) {
-        DeptDO exist = super.getById(dept.getId());
-        if (exist == null) {
-            throw new BusinessException(404, "部门不存在");
-        }
-        
+        DeptDO exist = requireVisibleDept(dept.getId());
+
         // 计算变更明细并记录操作日志
         List<String> diffItems = OperLogDiffUtils.diff(exist, dept);
         if (!diffItems.isEmpty()) {
@@ -106,6 +113,7 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
             throw new BusinessException("上级部门不能选择自己");
         }
         if (!parentId.equals(exist.getParentId() == null ? 0L : exist.getParentId())) {
+            requireVisibleParent(parentId);
             if (parentId == 0L) {
                 dept.setAncestors("0");
             } else {
@@ -130,6 +138,7 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
 
     @Override
     public void delete(Long id) {
+        requireVisibleDept(id);
         long childCount = count(new LambdaQueryWrapper<DeptDO>().eq(DeptDO::getParentId, id));
         if (childCount > 0) {
             throw new BusinessException(ErrorCodeConstants.DEPT_HAS_CHILDREN);
@@ -144,14 +153,12 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void move(Long id, Long parentId, Integer sort) {
-        DeptDO dept = super.getById(id);
-        if (dept == null) {
-            throw new BusinessException(404, "部门不存在");
-        }
+        DeptDO dept = requireVisibleDept(id);
         parentId = parentId == null ? 0L : parentId;
         if (id.equals(parentId)) {
             throw new BusinessException("上级部门不能选择自己");
         }
+        requireVisibleParent(parentId);
         if (parentId > 0) {
             DeptDO parent = super.getById(parentId);
             if (parent == null) {
@@ -170,6 +177,26 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
         }
         updateById(dept);
         updateChildAncestors(dept);
+    }
+
+    private DeptDO requireVisibleDept(Long id) {
+        DeptDO dept = super.getById(id);
+        if (dept == null) {
+            throw new BusinessException(404, "部门不存在");
+        }
+        if (!dataScopeService.isDeptVisible(id)) {
+            throw new BusinessException(403, "无权操作该部门");
+        }
+        return dept;
+    }
+
+    private void requireVisibleParent(Long parentId) {
+        if (parentId == null || parentId <= 0) {
+            return;
+        }
+        if (!dataScopeService.isDeptVisible(parentId)) {
+            throw new BusinessException(403, "无权操作该上级部门");
+        }
     }
 
     private void updateChildAncestors(DeptDO parentDept) {
@@ -195,7 +222,7 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
 
     @Override
     public void updateStatus(Long id, Integer status) {
-        DeptDO dept = getById(id);
+        DeptDO dept = requireVisibleDept(id);
         dept.setStatus(status);
         updateById(dept);
     }
@@ -203,12 +230,22 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
     @Override
     public PageResult<DeptDO> recyclePage(PageParam pageParam, String name, Integer status) {
         Page<DeptDO> page = new Page<>(pageParam.getPageNo(), pageParam.getPageSize());
-        Page<DeptDO> deletedPage = (Page<DeptDO>) baseMapper.selectDeletedPage(page, name, status);
+        DataScopeService.DataScopeContext scope = dataScopeService.getCurrentScope();
+        List<Long> visibleDeptIds = scope.all() ? null : dataScopeService.getVisibleDeptIds();
+        Page<DeptDO> deletedPage = (Page<DeptDO>) baseMapper.selectDeletedPage(
+                page, name, status, visibleDeptIds);
         return PageResult.of(deletedPage.getRecords(), deletedPage.getTotal());
     }
 
     @Override
     public void restore(Long id) {
+        DeptDO deleted = baseMapper.selectDeletedById(id);
+        if (deleted == null) {
+            throw new BusinessException(404, "回收站部门不存在");
+        }
+        if (!dataScopeService.isDeptVisible(id)) {
+            throw new BusinessException(403, "无权恢复该部门");
+        }
         if (baseMapper.restoreById(id) == 0) {
             throw new BusinessException(404, "回收站部门不存在");
         }
@@ -216,6 +253,13 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
 
     @Override
     public void deletePermanent(Long id) {
+        DeptDO deleted = baseMapper.selectDeletedById(id);
+        if (deleted == null) {
+            throw new BusinessException(404, "回收站部门不存在");
+        }
+        if (!dataScopeService.isDeptVisible(id)) {
+            throw new BusinessException(403, "无权删除该部门");
+        }
         if (baseMapper.deletePhysicalById(id) == 0) {
             throw new BusinessException(404, "回收站部门不存在");
         }
@@ -343,10 +387,24 @@ public class DeptServiceImpl extends ServiceImpl<DeptMapper, DeptDO> implements 
         return new ArrayList<>(ids);
     }
 
+    /**
+     * 组装部门树。
+     * <p>按数据范围过滤后，父部门可能不在结果集中（例如只能看到自己的部门），
+     * 此时把这类节点提升为根节点，避免整棵树因为找不到 parentId=0 的根而变成空列表。</p>
+     */
     private List<DeptDO> buildTree(List<DeptDO> depts) {
+        if (depts == null || depts.isEmpty()) {
+            return new ArrayList<>();
+        }
+        Set<Long> ids = depts.stream()
+                .map(DeptDO::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
         Map<Long, List<DeptDO>> parentMap = depts.stream()
                 .collect(Collectors.groupingBy(d -> d.getParentId() == null ? 0L : d.getParentId()));
-        depts.forEach(d -> d.setChildren(parentMap.get(d.getId())));
-        return parentMap.getOrDefault(0L, new ArrayList<>());
+        depts.forEach(d -> d.setChildren(parentMap.getOrDefault(d.getId(), new ArrayList<>())));
+        return depts.stream()
+                .filter(d -> !ids.contains(d.getParentId() == null ? 0L : d.getParentId()))
+                .collect(Collectors.toList());
     }
 }

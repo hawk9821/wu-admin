@@ -14,6 +14,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -24,6 +26,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("DeptServiceImpl 单元测试")
 class DeptServiceImplTest extends MybatisLambdaTestBase {
 
@@ -31,6 +34,8 @@ class DeptServiceImplTest extends MybatisLambdaTestBase {
     private DeptMapper deptMapper;
     @Mock
     private UserMapper userMapper;
+    @Mock
+    private com.admin.server.modules.system.service.permission.DataScopeService dataScopeService;
 
     @InjectMocks
     private DeptServiceImpl deptService;
@@ -38,6 +43,8 @@ class DeptServiceImplTest extends MybatisLambdaTestBase {
     @BeforeEach
     void wireBaseMapper() {
         ReflectionTestUtils.setField(Objects.requireNonNull(deptService), "baseMapper", deptMapper);
+        // 写操作新增了按 ID 的数据范围校验，测试默认按超管放行
+        when(dataScopeService.isDeptVisible(anyLong())).thenReturn(true);
     }
 
     @Test
@@ -83,6 +90,7 @@ class DeptServiceImplTest extends MybatisLambdaTestBase {
     @Test
     @DisplayName("delete：存在子部门时拒绝删除")
     void delete_rejectsWhenHasChildren() {
+        when(deptMapper.selectById(1L)).thenReturn(ServiceTestFixtures.dept(1L, 0L, "总部"));
         when(deptMapper.selectCount(MybatisMockMatchers.anyLambdaQueryWrapper())).thenReturn(2L);
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -95,6 +103,7 @@ class DeptServiceImplTest extends MybatisLambdaTestBase {
     @Test
     @DisplayName("delete：部门下有用户时拒绝删除")
     void delete_rejectsWhenHasUsers() {
+        when(deptMapper.selectById(1L)).thenReturn(ServiceTestFixtures.dept(1L, 0L, "总部"));
         when(deptMapper.selectCount(MybatisMockMatchers.anyLambdaQueryWrapper())).thenReturn(0L);
         when(userMapper.selectCount(MybatisMockMatchers.anyLambdaQueryWrapper())).thenReturn(3L);
 
@@ -151,5 +160,23 @@ class DeptServiceImplTest extends MybatisLambdaTestBase {
         assertNotNull(tree.get(0).getChildren());
         assertEquals(1, tree.get(0).getChildren().size());
         assertEquals(2L, tree.get(0).getChildren().get(0).getId());
+    }
+
+    @Test
+    @DisplayName("tree：父部门被数据范围过滤时，子部门提升为根节点")
+    void tree_promotesOrphanWhenParentFilteredOut() {
+        // 普通用户数据范围为“本部门及以下”，只会查到自己的部门，父部门不在结果集中
+        DeptDO ownDept = ServiceTestFixtures.dept(3L, 1L, "运营部");
+        when(deptMapper.selectList(MybatisMockMatchers.anyLambdaQueryWrapper()))
+                .thenReturn(List.of(ownDept));
+        when(userMapper.selectList(MybatisMockMatchers.anyLambdaQueryWrapper())).thenReturn(List.of());
+
+        List<DeptDO> tree = deptService.tree(null, null);
+
+        assertEquals(1, tree.size());
+        assertEquals(3L, tree.get(0).getId());
+        assertEquals("运营部", tree.get(0).getName());
+        assertNotNull(tree.get(0).getChildren());
+        assertTrue(tree.get(0).getChildren().isEmpty());
     }
 }

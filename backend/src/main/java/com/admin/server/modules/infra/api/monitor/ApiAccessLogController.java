@@ -1,5 +1,6 @@
 package com.admin.server.modules.infra.api.monitor;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageResult;
 import com.admin.server.framework.export.ExportFormat;
@@ -11,7 +12,6 @@ import com.admin.server.modules.infra.service.monitor.ApiAccessLogService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -36,7 +36,7 @@ public class ApiAccessLogController {
 
     @Operation(summary = "分页查询 API 访问日志")
     @GetMapping("/page")
-    @PreAuthorize("@ss.hasPermission('monitor:apiAccess:query')")
+    @RequirePermission("monitor:apiAccess:query")
     public CommonResult<PageResult<ApiAccessLogDO>> page(
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "20") Integer pageSize,
@@ -53,7 +53,7 @@ public class ApiAccessLogController {
     @Log(title = "API访问统计", businessType = Log.BusinessType.EXPORT, isSaveResponseData = false)
     @Operation(summary = "导出 API 访问日志")
     @GetMapping("/export")
-    @PreAuthorize("@ss.hasPermission('monitor:apiAccess:query')")
+    @RequirePermission("monitor:apiAccess:query")
     public void export(HttpServletResponse response,
                        @RequestParam(defaultValue = "xlsx") String format,
                        @RequestParam(defaultValue = "filtered") String scope,
@@ -72,7 +72,7 @@ public class ApiAccessLogController {
 
     @Operation(summary = "获取统计数据")
     @GetMapping("/statistics")
-    @PreAuthorize("@ss.hasPermission('monitor:apiAccess:query')")
+    @RequirePermission("monitor:apiAccess:query")
     public CommonResult<Map<String, Object>> statistics(
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate) {

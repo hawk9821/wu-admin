@@ -17,6 +17,7 @@ app:
       oper-log-days: 90
       login-log-days: 90
       api-access-log-days: 30
+      security-event-days: 90
   job:
     log-retention-days: 30
     notice-read-retention-days: 90
@@ -57,10 +58,7 @@ spring:
       port: 6379
       database: 1
       # Redis 密码仅在 application-prod.yml（prod 环境）；本地 dev 无密码
-  # 禁用 Spring Security 默认用户（使用 Sa-Token + 自定义 SecurityConfig）
-  security:
-    user:
-      password: disabled
+  # 鉴权统一由 Sa-Token 承担（登录态 + 注解权限校验）
   mail:
     host: ${SPRING_MAIL_HOST:smtp.qq.com}
     port: ${SPRING_MAIL_PORT:465}
@@ -119,8 +117,6 @@ sa-token:
   is-read-cookie: true
   is-read-header: true
   is-write-cookie: true
-  # SameSite=Lax 防 CSRF；Secure 由 app.security.cookie-secure 动态控制
-  cookie-same-site: Lax
   is-read-body: false
 
 # 登录防爬：图形验证码开关与按 IP 分钟限流（0 表示不限制）

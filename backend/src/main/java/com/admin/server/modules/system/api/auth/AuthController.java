@@ -15,6 +15,7 @@ import com.admin.server.modules.system.api.auth.vo.LoginReqVO;
 import com.admin.server.modules.system.api.auth.vo.RegisterReqVO;
 import com.admin.server.modules.system.api.auth.vo.SmsCodeReqVO;
 import com.admin.server.modules.system.api.auth.vo.SmsCodeVerifyReqVO;
+import com.admin.server.modules.system.api.auth.vo.SliderVerifyReqVO;
 import com.admin.server.modules.system.dal.dataobject.user.UserDO;
 import com.admin.server.modules.system.service.auth.AuthForgotPasswordService;
 import com.admin.server.modules.system.service.auth.AuthService;
@@ -51,6 +52,8 @@ public class AuthController {
     private SystemConfigHelper systemConfigHelper;
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private com.admin.server.framework.security.core.service.VerificationCodeGuard verificationCodeGuard;
 
     @Operation(summary = "获取验证码")
     @GetMapping("/captcha")
@@ -68,6 +71,16 @@ public class AuthController {
             HttpServletRequest request) {
         String clientIp = ClientIpUtils.resolve(request);
         return CommonResult.success(authService.createSliderChallenge(scene, clientIp));
+    }
+
+    @Operation(summary = "校验滑块验证码并签发一次性票据")
+    @PostMapping("/slider-verify")
+    public CommonResult<Map<String, Object>> sliderVerify(
+            @RequestBody SliderVerifyReqVO reqVO,
+            HttpServletRequest request) {
+        String clientIp = ClientIpUtils.resolve(request);
+        return CommonResult.success(sliderCaptchaService.verifyChallenge(
+                reqVO.getToken(), reqVO.getOffsetX(), reqVO.getDurationMs(), reqVO.getEvents(), clientIp));
     }
 
     @Operation(summary = "获取登录配置")
@@ -123,7 +136,8 @@ public class AuthController {
             if (StrUtil.isBlank(uuid) || StrUtil.isBlank(code)) {
                 throw new BusinessException(400, "获取签名密钥须提供人机校验凭证或具备登录态");
             }
-            String sliderErr = sliderCaptchaService.verifyAndConsume(uuid, code);
+            String sliderErr = sliderCaptchaService.verifyAndConsume(
+                    uuid, code, null, ClientIpUtils.resolve(request));
             if (sliderErr != null) {
                 throw new BusinessException(400, sliderErr);
             }
@@ -165,6 +179,9 @@ public class AuthController {
     public CommonResult<Map<String, Object>> login(@Validated @RequestBody LoginReqVO reqVO, HttpServletRequest request) {
         String clientIp = ClientIpUtils.resolve(request);
         String userAgent = request.getHeader("User-Agent");
+        if (StrUtil.isBlank(reqVO.getClientId())) {
+            reqVO.setClientId(request.getHeader("X-Client-Id"));
+        }
         if (SystemConfigHelper.LOGIN_TYPE_SMS.equalsIgnoreCase(reqVO.getLoginType())) {
             return CommonResult.success(authService.loginBySms(reqVO, clientIp, userAgent));
         }
@@ -207,7 +224,13 @@ public class AuthController {
 
     @Operation(summary = "核验短信验证码")
     @PostMapping("/sms-code/verify")
-    public CommonResult<Boolean> verifySmsCode(@Validated @RequestBody SmsCodeVerifyReqVO reqVO) {
+    public CommonResult<Boolean> verifySmsCode(@Validated @RequestBody SmsCodeVerifyReqVO reqVO,
+                                               HttpServletRequest request) {
+        String clientIp = ClientIpUtils.resolve(request);
+        String rlMsg = verificationCodeGuard.checkIpLimit("sms-verify", clientIp);
+        if (rlMsg != null) {
+            throw new BusinessException(429, rlMsg);
+        }
         authService.verifySmsCode(reqVO);
         return CommonResult.success(true);
     }
@@ -263,7 +286,12 @@ public class AuthController {
     @Log(title = "忘记密码重置", businessType = Log.BusinessType.UPDATE, isSaveRequestData = false)
     @Operation(summary = "忘记密码-短信重置密码")
     @PostMapping("/forgot-password/reset")
-    public CommonResult<Boolean> forgotPasswordReset(@Validated @RequestBody ForgotPasswordResetReqVO reqVO) {
+    public CommonResult<Boolean> forgotPasswordReset(@Validated @RequestBody ForgotPasswordResetReqVO reqVO,
+                                                     HttpServletRequest request) {
+        String rlMsg = verificationCodeGuard.checkIpLimit("pwd-reset", ClientIpUtils.resolve(request));
+        if (rlMsg != null) {
+            throw new BusinessException(429, rlMsg);
+        }
         UserDO user = authForgotPasswordService.resolveUser(reqVO.getUsername());
         String validateErr = authForgotPasswordService.validateUserForForgot(user);
         if (validateErr != null) {

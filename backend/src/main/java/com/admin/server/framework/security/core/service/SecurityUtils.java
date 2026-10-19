@@ -3,12 +3,10 @@ package com.admin.server.framework.security.core.service;
 import cn.dev33.satoken.stp.StpUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
 
 /**
- * 安全工具类
+ * 安全工具类（登录态唯一来源为 Sa-Token）。
  */
 public class SecurityUtils {
 
@@ -18,7 +16,7 @@ public class SecurityUtils {
     }
 
     /**
-     * 获取当前登录用户ID
+     * 获取当前登录用户ID，未登录返回 null
      */
     public static Long getLoginUserId() {
         try {
@@ -27,18 +25,6 @@ public class SecurityUtils {
             }
         } catch (Exception e) {
             log.debug("getLoginUserId via Sa-Token failed: {}", e.getMessage());
-        }
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated()) {
-            return null;
-        }
-        Object principal = authentication.getPrincipal();
-        if (principal instanceof Long) {
-            return (Long) principal;
-        }
-        Object details = authentication.getDetails();
-        if (details instanceof Long) {
-            return (Long) details;
         }
         return null;
     }
@@ -65,16 +51,7 @@ public class SecurityUtils {
         } catch (Exception e) {
             log.debug("getLoginUsername via Sa-Token failed: {}", e.getMessage());
         }
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated()) {
-            return null;
-        }
-        String name = authentication.getName();
-        // principal 为 Long 时 getName() 仅为数字 ID，不能当作用户名
-        if (name != null && name.matches("\\d+")) {
-            return null;
-        }
-        return name;
+        return null;
     }
 
     /**
@@ -95,7 +72,6 @@ public class SecurityUtils {
         } catch (Exception e) {
             log.debug("getLoginUserDisplayName via Sa-Token failed: {}", e.getMessage());
         }
-        String name = getLoginUsername();
-        return name;
+        return null;
     }
 }

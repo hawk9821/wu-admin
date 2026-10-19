@@ -3,6 +3,8 @@ package com.admin.server.modules.system.service.config;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
+import com.admin.server.framework.security.core.Sm2KeyManager;
+import com.admin.server.framework.security.core.util.Sm2Util;
 import com.admin.server.modules.system.framework.cache.SysConfigCacheService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
@@ -46,11 +48,17 @@ public class SystemConfigHelper {
     @Resource
     private SysConfigCacheService sysConfigCacheService;
 
+    @Resource
+    private Sm2KeyManager sm2KeyManager;
+
     @Value("${auth.security.captcha-enabled:true}")
     private boolean defaultCaptchaEnabled;
 
     @Value("${file.storage.max-size-mb:50}")
     private int defaultMaxSizeMb;
+
+    @Value("${file.storage.local-path:./data/uploads}")
+    private String defaultLocalPath;
 
     @Value("${file.storage.allowed-extensions:jpg,jpeg,png,gif,webp}")
     private String defaultAllowedExtensions;
@@ -139,6 +147,50 @@ public class SystemConfigHelper {
         return StrUtil.isBlank(ext) ? defaultAllowedExtensions : ext.trim();
     }
 
+    /**
+     * 获取完整的文件与对象存储引擎配置模型
+     */
+    public com.admin.server.framework.storage.StorageConfig getStorageConfig() {
+        return parseStorageConfig(getGroupJson(GROUP_FILE));
+    }
+
+    /**
+     * 将 file 配置 JSON 解析为存储配置模型。
+     * <p>localPath 为空时必须回退到 yml 中的 file.storage.local-path，
+     * 不能让空串把绝对存储目录覆盖成相对进程工作目录的 ./data/uploads。</p>
+     */
+    public com.admin.server.framework.storage.StorageConfig parseStorageConfig(JSONObject file) {
+        JSONObject source = file == null ? new JSONObject() : file;
+        String localPath = source.getStr("localPath", "");
+        if (StrUtil.isBlank(localPath)) {
+            localPath = defaultLocalPath;
+        }
+        String type = source.getStr("type", "local");
+        if (StrUtil.isBlank(type)) {
+            type = "local";
+        }
+        return com.admin.server.framework.storage.StorageConfig.builder()
+                .type(type)
+                .localPath(localPath)
+                .localDomain(source.getStr("localDomain", ""))
+                .minioDomain(source.getStr("minioDomain", ""))
+                .minioEndpoint(source.getStr("minioEndpoint", ""))
+                .minioAccessKey(source.getStr("minioAccessKey", source.getStr("accessKey", "")))
+                .minioSecretKey(source.getStr("minioSecretKey", source.getStr("secretKey", "")))
+                .minioBucket(source.getStr("minioBucket", "wu-admin"))
+                .cosSecretId(source.getStr("cosSecretId", ""))
+                .cosSecretKey(source.getStr("cosSecretKey", ""))
+                .cosRegion(source.getStr("cosRegion", ""))
+                .cosBucket(source.getStr("cosBucket", ""))
+                .cosDomain(source.getStr("cosDomain", ""))
+                .ossEndpoint(source.getStr("ossEndpoint", ""))
+                .ossAccessKeyId(source.getStr("ossAccessKeyId", source.getStr("accessKeyId", "")))
+                .ossAccessKeySecret(source.getStr("ossAccessKeySecret", source.getStr("accessKeySecret", "")))
+                .ossBucket(source.getStr("ossBucket", ""))
+                .ossDomain(source.getStr("ossDomain", ""))
+                .build();
+    }
+
     // ---------- 接口限流 ----------
     public int getCaptchaPerIpMinute() {
         return clampRate(getGroupJson(GROUP_RATE_LIMIT).getInt("captchaPerIpMinute", defaultCaptchaPerIpMinute));
@@ -181,11 +233,30 @@ public class SystemConfigHelper {
         return clampRate(getGroupJson(GROUP_RATE_LIMIT).getInt("aiChatPerUserMinute", 8));
     }
 
+    /** 通用业务 API：单 IP 每分钟请求上限（应用层滑动窗口兜底，0 表示不限制） */
+    public int getApiPerIpMinute() {
+        return clampRate(getGroupJson(GROUP_RATE_LIMIT).getInt("apiPerIpMinute", 240), 2000);
+    }
+
+    /** 认证接口：单 IP 每分钟请求上限（应用层滑动窗口兜底，0 表示不限制） */
+    public int getAuthPerIpMinute() {
+        return clampRate(getGroupJson(GROUP_RATE_LIMIT).getInt("authPerIpMinute", 60), 600);
+    }
+
+    /** 文件访问：单 IP 每分钟请求上限（应用层滑动窗口兜底，0 表示不限制） */
+    public int getFilesPerIpMinute() {
+        return clampRate(getGroupJson(GROUP_RATE_LIMIT).getInt("filesPerIpMinute", 600), 5000);
+    }
+
     private int clampRate(int n) {
+        return clampRate(n, 200);
+    }
+
+    private int clampRate(int n, int max) {
         if (n <= 0) {
             return 0;
         }
-        return Math.min(n, 200);
+        return Math.min(n, max);
     }
 
     private int clampDaily(int n) {
@@ -381,10 +452,69 @@ public class SystemConfigHelper {
         return getGroupJson(GROUP_SECURITY).getBool("nonceEnabled", true);
     }
 
+    /** 风险分触发临时封禁（1 小时）的阈值，默认 80 */
+    public int getRiskBlockScore() {
+        int n = getGroupJson(GROUP_SECURITY).getInt("riskBlockScore", 80);
+        return Math.max(20, Math.min(n, 1000));
+    }
+
+    /** 风险分触发 24 小时封禁的阈值，默认 120，且必须高于临时封禁阈值 */
+    public int getRiskBanScore() {
+        int block = getRiskBlockScore();
+        int n = getGroupJson(GROUP_SECURITY).getInt("riskBanScore", 120);
+        return Math.max(block + 1, Math.min(n, 2000));
+    }
+
     /** SM4 对称秘钥（16 字节密钥），未配置时返回空串（不提供硬编码兜底密钥） */
     public String getSm4SecretKey() {
         String key = getGroupJson(GROUP_SECURITY).getStr("sm4SecretKey", "");
         return StrUtil.isBlank(key) ? "" : key.trim();
+    }
+
+    /** 是否启用 SM2 密码与凭证非对称加密传输（默认开启） */
+    public boolean isSm2EncryptEnabled() {
+        return getGroupJson(GROUP_SECURITY).getBool("sm2EncryptEnabled", true);
+    }
+
+    /**
+     * 获取 SM2 椭圆公钥（用于下发给前端进行密码加密）。
+     * <p>优先使用系统配置中显式指定的公钥；未配置时使用运行时托管的密钥对公钥，
+     * 不再回退到任何硬编码默认值。</p>
+     */
+    public String getSm2PublicKey() {
+        String key = getGroupJson(GROUP_SECURITY).getStr("sm2PublicKey", "");
+        return StrUtil.isNotBlank(key) ? key.trim() : sm2KeyManager.getPublicKey();
+    }
+
+    /**
+     * 获取 SM2 椭圆私钥（仅存服务端，用于解密前端密文密码）。
+     * <p>优先使用系统配置中显式指定的私钥；未配置时使用运行时托管的密钥对私钥，
+     * 私钥不会出现在任何接口响应中。</p>
+     */
+    public String getSm2PrivateKey() {
+        String key = getGroupJson(GROUP_SECURITY).getStr("sm2PrivateKey", "");
+        return StrUtil.isNotBlank(key) ? key.trim() : sm2KeyManager.getPrivateKey();
+    }
+
+    /**
+     * 轮换运行时 SM2 密钥对。仅在未显式配置固定密钥时生效。
+     */
+    public void rotateRuntimeSm2KeyPair() {
+        sm2KeyManager.rotate();
+    }
+
+    /**
+     * 解析并解密客户端提交的用户口令（密码）。
+     * <p>若客户端采用国密 SM2 满血标准公钥加密（支持 sm2: 前缀或标准十六进制密文），
+     * 使用系统 SM2 椭圆私钥解密为原始明文；
+     * 若未加密或非 SM2 密文格式，安全原样返回，确保向后兼容与绝对零回归。</p>
+     *
+     * @param rawPassword 原始传入密码字符串
+     * @return 解密后的明文密码
+     */
+    public String decryptPasswordIfEncrypted(String rawPassword) {
+        String priKey = getSm2PrivateKey();
+        return Sm2Util.decryptPasswordIfEncrypted(priKey, rawPassword);
     }
 
     // ---------- 短信配置 ----------
@@ -658,7 +788,9 @@ public class SystemConfigHelper {
         security.put("sm3SignEnabled", sm3SignActive);
         security.put("sm2SignEnabled", sm3SignActive);
         security.put("sm4EncryptEnabled", sm4Active);
-        // 严禁输出：sm4Key / sm3SignKey 等任何密钥材料
+        security.put("sm2EncryptEnabled", isSm2EncryptEnabled());
+        security.put("sm2PublicKey", getSm2PublicKey());
+        // 严禁输出：sm4Key / sm3SignKey / sm2PrivateKey 等任何私钥或对称会话材料
 
         result.put("security", security);
 

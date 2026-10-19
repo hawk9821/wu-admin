@@ -1,62 +1,85 @@
 package com.admin.server.common.util;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.util.StringUtils;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * 解析真实客户端 IP。配合 Nginx {@code proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for} 时，
- * 逗号分隔列表中<strong>最右侧</strong>一般为直连代理的客户端地址，可避免左侧伪造段绕过限流。
+ * 解析真实客户端 IP。
+ *
+ * <p>只有在请求确实来自可信代理（默认回环与内网网段）时，才读取
+ * {@code X-Real-IP} / {@code X-Forwarded-For} / {@code CF-Connecting-IP}，
+ * 否则一律使用 TCP 连接的对端地址。这样即使攻击者直连应用端口并伪造
+ * 代理头，也无法伪装成任意 IP 绕过封禁、登录锁定和限流。</p>
+ *
+ * <p>可信代理可通过 JVM 参数覆盖：
+ * {@code -Dapp.security.trusted-proxies=127.0.0.1/32,10.0.0.0/8}，
+ * 或环境变量 {@code APP_SECURITY_TRUSTED_PROXIES}。</p>
  */
 public final class ClientIpUtils {
+
+    private static final String TRUSTED_PROXIES_PROPERTY = "app.security.trusted-proxies";
+    private static final String TRUSTED_PROXIES_ENV = "APP_SECURITY_TRUSTED_PROXIES";
+
+    private static final List<Cidr> TRUSTED_PROXIES = loadTrustedProxies();
 
     private ClientIpUtils() {
     }
 
     public static String resolve(HttpServletRequest request) {
-        // 若经过 Cloudflare 代理，优先使用 CF 官方权威客户端 IP
-        String cfIp = request.getHeader("CF-Connecting-IP");
-        if (StringUtils.hasText(cfIp)) {
-            int comma = cfIp.indexOf(',');
-            String first = comma > 0 ? cfIp.substring(0, comma).trim() : cfIp.trim();
-            if (!first.isEmpty()) {
-                return stripIpv6Prefix(first);
-            }
+        String remote = normalize(request.getRemoteAddr());
+        if (!isTrustedProxy(remote)) {
+            return StringUtils.hasText(remote) ? remote : "unknown";
         }
 
-        String xff = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(xff)) {
-            String[] parts = xff.split(",");
+        // Nginx 应使用 proxy_set_header X-Real-IP $remote_addr 覆盖该头
+        String realIp = normalize(firstValue(request.getHeader("X-Real-IP")));
+        if (isValidIp(realIp)) {
+            return realIp;
+        }
+
+        // 取 X-Forwarded-For 最右侧非空段：这是直连代理看到的客户端地址
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (StringUtils.hasText(forwardedFor)) {
+            String[] parts = forwardedFor.split(",");
             for (int i = parts.length - 1; i >= 0; i--) {
-                String candidate = parts[i].trim();
-                if (!candidate.isEmpty()) {
-                    return stripIpv6Prefix(candidate);
+                String candidate = normalize(parts[i].trim());
+                if (isValidIp(candidate)) {
+                    return candidate;
                 }
             }
         }
-        String realIp = request.getHeader("X-Real-IP");
-        if (StringUtils.hasText(realIp)) {
-            int comma = realIp.indexOf(',');
-            String first = comma > 0 ? realIp.substring(0, comma).trim() : realIp.trim();
-            if (!first.isEmpty()) {
-                return stripIpv6Prefix(first);
-            }
+
+        // Cloudflare 回源场景：Nginx 的 real_ip 模块会把 $remote_addr 还原成真实 IP，
+        // 因此 X-Real-IP 已经足够；这里保留 CF 头仅作兜底，且只在可信代理来源下读取。
+        String cfIp = normalize(firstValue(request.getHeader("CF-Connecting-IP")));
+        if (isValidIp(cfIp)) {
+            return cfIp;
         }
-        String remote = request.getRemoteAddr();
-        return StringUtils.hasText(remote) ? stripIpv6Prefix(remote) : "unknown";
+        return remote;
     }
 
-    private static String stripIpv6Prefix(String ip) {
-        if (ip == null || ip.isEmpty()) {
-            return ip;
+    private static String firstValue(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        int comma = value.indexOf(',');
+        return (comma > 0 ? value.substring(0, comma) : value).trim();
+    }
+
+    private static String normalize(String ip) {
+        if (!StringUtils.hasText(ip)) {
+            return "";
         }
         String trimmed = ip.trim();
-        if (isLoopback(trimmed)) {
-            return "127.0.0.1";
-        }
         if (trimmed.startsWith("::ffff:") && trimmed.indexOf('.') > 0) {
-            return trimmed.substring(7);
+            trimmed = trimmed.substring(7);
+        }
+        if (isValidIp(trimmed) && isLoopback(trimmed)) {
+            return "127.0.0.1";
         }
         return trimmed;
     }
@@ -66,6 +89,133 @@ public final class ClientIpUtils {
             return InetAddress.getByName(ip).isLoopbackAddress();
         } catch (Exception e) {
             return "127.0.0.1".equals(ip) || "::1".equals(ip);
+        }
+    }
+
+    private static boolean isValidIp(String ip) {
+        if (!StringUtils.hasText(ip)) {
+            return false;
+        }
+        if (ip.indexOf(':') >= 0) {
+            // 只接受 IPv6 字面量，避免把域名交给 getByName 触发 DNS 解析
+            if (!ip.matches("[0-9a-fA-F:.]+")) {
+                return false;
+            }
+        } else {
+            String[] parts = ip.split("\\.");
+            if (parts.length != 4) {
+                return false;
+            }
+            for (String part : parts) {
+                if (!part.matches("\\d{1,3}")) {
+                    return false;
+                }
+                int value = Integer.parseInt(part);
+                if (value > 255) {
+                    return false;
+                }
+            }
+        }
+        try {
+            return InetAddress.getByName(ip) != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean isTrustedProxy(String ip) {
+        byte[] address = toBytes(ip);
+        if (address == null) {
+            return false;
+        }
+        for (Cidr cidr : TRUSTED_PROXIES) {
+            if (cidr.matches(address)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static byte[] toBytes(String ip) {
+        if (!isValidIp(ip)) {
+            return null;
+        }
+        try {
+            return InetAddress.getByName(ip).getAddress();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static List<Cidr> loadTrustedProxies() {
+        String configured = System.getProperty(TRUSTED_PROXIES_PROPERTY);
+        if (!StringUtils.hasText(configured)) {
+            configured = System.getenv(TRUSTED_PROXIES_ENV);
+        }
+        List<Cidr> result = new ArrayList<>();
+        if (StringUtils.hasText(configured)) {
+            for (String item : configured.split(",")) {
+                Cidr cidr = Cidr.parse(item.trim());
+                if (cidr != null) {
+                    result.add(cidr);
+                }
+            }
+        }
+        if (!result.isEmpty()) {
+            return List.copyOf(result);
+        }
+        List<Cidr> defaults = new ArrayList<>();
+        for (String item : List.of("127.0.0.0/8", "::1/128", "10.0.0.0/8",
+                "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")) {
+            Cidr cidr = Cidr.parse(item);
+            if (cidr != null) {
+                defaults.add(cidr);
+            }
+        }
+        return List.copyOf(defaults);
+    }
+
+    private record Cidr(byte[] network, int prefix) {
+
+        static Cidr parse(String value) {
+            if (!StringUtils.hasText(value)) {
+                return null;
+            }
+            String[] parts = value.split("/", 2);
+            byte[] address = toBytes(parts[0].trim());
+            if (address == null) {
+                return null;
+            }
+            int prefix = address.length * 8;
+            if (parts.length == 2) {
+                try {
+                    prefix = Integer.parseInt(parts[1].trim());
+                } catch (NumberFormatException e) {
+                    return null;
+                }
+            }
+            if (prefix < 0 || prefix > address.length * 8) {
+                return null;
+            }
+            return new Cidr(address, prefix);
+        }
+
+        boolean matches(byte[] candidate) {
+            if (candidate == null || candidate.length != network.length) {
+                return false;
+            }
+            int fullBytes = prefix / 8;
+            int remainingBits = prefix % 8;
+            for (int i = 0; i < fullBytes; i++) {
+                if (candidate[i] != network[i]) {
+                    return false;
+                }
+            }
+            if (remainingBits == 0) {
+                return true;
+            }
+            int mask = 0xFF << (8 - remainingBits);
+            return (candidate[fullBytes] & mask) == (network[fullBytes] & mask);
         }
     }
 }

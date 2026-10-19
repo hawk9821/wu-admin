@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.Resource;
 
 /**
- * 权限校验（Spring EL bean 名 {@code ss}，兼容既有 @PreAuthorize）
+ * 权限校验（实现 {@link PermissionApi}，由 {@code @RequirePermission} 切面调用）
  */
 @Service("ss")
 public class SystemPermissionService implements PermissionApi {

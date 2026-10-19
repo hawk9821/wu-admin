@@ -7,6 +7,12 @@
       <view v-if="showDownload" class="file-sheet__action" @click="onDownload">
         <text class="file-sheet__action-text">下载</text>
       </view>
+      <view v-if="showRename" class="file-sheet__action" @click="onRename">
+        <text class="file-sheet__action-text">重命名</text>
+      </view>
+      <view v-if="showMove" class="file-sheet__action" @click="onMove">
+        <text class="file-sheet__action-text">移动到分组</text>
+      </view>
       <view v-if="showDelete" class="file-sheet__action file-sheet__action--danger" @click="onDelete">
         <text class="file-sheet__action-text">删除</text>
       </view>
@@ -21,12 +27,16 @@ defineProps<{
   visible: boolean
   fileName?: string
   showDownload?: boolean
+  showRename?: boolean
+  showMove?: boolean
   showDelete?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
   download: []
+  rename: []
+  move: []
   delete: []
 }>()
 
@@ -36,6 +46,16 @@ function close() {
 
 function onDownload() {
   emit('download')
+  emit('close')
+}
+
+function onRename() {
+  emit('rename')
+  emit('close')
+}
+
+function onMove() {
+  emit('move')
   emit('close')
 }
 

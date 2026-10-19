@@ -20,6 +20,7 @@ import org.redisson.api.RDeque;
 import org.redisson.api.RedissonClient;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import jakarta.annotation.Resource;
@@ -42,6 +43,9 @@ public class ApiAccessLogServiceImpl extends ServiceImpl<ApiAccessLogMapper, Api
     private ObjectMapper objectMapper;
     @Resource
     private UserMapper userMapper;
+    /** 定时线程没有外层事务，批量落库必须显式开启事务，否则 MyBatis-Plus 每次都会告警 Transaction not enabled */
+    @Resource
+    private TransactionTemplate transactionTemplate;
 
     private RDeque<String> queue() {
         return redissonClient.getDeque(REDIS_QUEUE_KEY);
@@ -75,7 +79,8 @@ public class ApiAccessLogServiceImpl extends ServiceImpl<ApiAccessLogMapper, Api
                 }
             }
             if (!batch.isEmpty()) {
-                saveBatch(batch);
+                // 在事务内批量写入：既能让 MyBatis-Plus 走真正的批处理，也能在失败时整体回滚
+                transactionTemplate.executeWithoutResult(status -> saveBatch(batch));
                 log.debug("API 访问日志批量落库: {} 条", batch.size());
             }
         } catch (Exception e) {

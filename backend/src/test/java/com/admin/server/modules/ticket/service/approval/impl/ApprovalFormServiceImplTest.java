@@ -12,15 +12,19 @@ import com.admin.server.modules.system.dal.mysql.notice.NoticeMapper;
 import com.admin.server.modules.system.dal.mysql.user.UserMapper;
 import com.admin.server.modules.ticket.service.approval.RegisterApprovalService;
 import com.admin.server.modules.system.service.notice.NoticeService;
+import com.admin.server.modules.system.service.permission.DataScopeService;
 import com.admin.server.modules.system.service.permission.PermissionService;
 import com.admin.server.testsupport.MybatisLambdaTestBase;
 import com.admin.server.testsupport.ServiceTestFixtures;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -44,9 +48,18 @@ class ApprovalFormServiceImplTest extends MybatisLambdaTestBase {
     private RegisterApprovalService registerApprovalService;
     @Mock
     private NoticeService noticeService;
+    @Mock
+    private DataScopeService dataScopeService;
 
     @InjectMocks
     private ApprovalFormServiceImpl approvalFormService;
+
+    @BeforeEach
+    void stubDataScope() {
+        // 审批单可见性默认按超管放行，具体用例可覆盖
+        lenient().when(dataScopeService.getCurrentScope())
+                .thenReturn(new DataScopeService.DataScopeContext(true, false, List.of(), 1L, 1L));
+    }
 
     @Test
     @DisplayName("get：审批单不存在抛 404")
@@ -191,6 +204,8 @@ class ApprovalFormServiceImplTest extends MybatisLambdaTestBase {
     @Test
     @DisplayName("deletePermanent：物理删除关联站内信")
     void deletePermanent_removesRelatedNotices() {
+        ApprovalFormDO form = ServiceTestFixtures.generalApprovalForm(4L, 10L, 99L, "ARCHIVED");
+        when(approvalFormMapper.selectDeletedById(4L)).thenReturn(form);
         when(approvalFormMapper.deletePhysicalById(4L)).thenReturn(1);
 
         approvalFormService.deletePermanent(4L);

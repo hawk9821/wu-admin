@@ -38,6 +38,9 @@ const DEFAULTS = {
     smsPerPhoneDaily: 10,
     smsPerIpDaily: 30,
     aiChatPerUserMinute: 8,
+    apiPerIpMinute: 240,
+    authPerIpMinute: 60,
+    filesPerIpMinute: 600,
   },
   login: {
     captchaEnabled: true,
@@ -79,7 +82,15 @@ const DEFAULTS = {
   },
   security: {
     disableDevtool: false,
-    isConcurrent: false
+    isConcurrent: false,
+    sm2EncryptEnabled: true,
+    sm4EncryptEnabled: true,
+    sm2SignEnabled: true,
+    sm3SignEnabled: true,
+    timestampEnabled: true,
+    nonceEnabled: true,
+    riskBlockScore: 80,
+    riskBanScore: 120,
   },
   sms: {
     enabled: false, provider: 'aliyunAuth',
@@ -317,6 +328,11 @@ export function useConfigDraft() {
     try {
       for (const code of GROUP_CODES) {
         const payload = normalizePayload(code, cloneConfig(draft[code]))
+        const savedNormalized = normalizePayload(code, cloneConfig(savedSnapshot[code]))
+        // 只提交真正变化的配置分组，避免未修改的 file 分组被反复写库和做远程连通性测试
+        if (JSON.stringify(payload) === JSON.stringify(savedNormalized)) {
+          continue
+        }
         await updateConfigGroup(code, JSON.stringify(payload))
         const saved = cloneConfig(payload)
         setConfigGroup(savedSnapshot, code, saved)

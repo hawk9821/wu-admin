@@ -4,7 +4,6 @@ import com.admin.server.modules.system.dal.dataobject.permission.*;
 import com.admin.server.modules.system.dal.mysql.permission.*;
 import com.admin.server.modules.system.service.permission.event.UserPermissionChangedEvent;
 import cn.hutool.core.collection.CollUtil;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,6 +48,7 @@ public class PermissionServiceImpl implements PermissionService {
 
     @Override
     public Set<Long> getUserRoleIdListByUserId(Long userId) {
+        // 权限查询以 userId / roleId 为锚点，直接查询关联表
         List<UserRoleDO> list = userRoleMapper.selectListByUserId(userId);
         return list.stream().map(UserRoleDO::getRoleId).collect(Collectors.toSet());
     }
@@ -96,7 +96,8 @@ public class PermissionServiceImpl implements PermissionService {
         if (CollUtil.isEmpty(ids)) {
             return ids;
         }
-        List<MenuDO> menus = listMenusByIds(ids, true);
+        // 只查勾选到的这批菜单（数量可控），不与全表比较
+        List<MenuDO> menus = menuMapper.selectByIds(ids);
         Set<Long> parentIdsInAssigned = menus.stream()
                 .map(MenuDO::getId)
                 .filter(id -> menus.stream().anyMatch(m -> id.equals(m.getParentId())))
@@ -111,17 +112,22 @@ public class PermissionServiceImpl implements PermissionService {
         if (!StringUtils.hasText(permission)) {
             return false;
         }
-        if (matchPermissionDirect(userId, permission)) {
+        // 一次 JOIN 取回该用户全部权限码，避免每次校验都回查整张菜单表
+        Set<String> owned = new HashSet<>(menuMapper.selectPermissionCodesByUserId(userId));
+        if (owned.isEmpty()) {
+            return false;
+        }
+        if (owned.contains(permission)) {
             return true;
         }
         // 仅有「xxx:query」时，允许访问「xxx:list」列表接口（只读）
         String queryAlias = toQueryAlias(permission);
-        if (queryAlias != null && matchPermissionDirect(userId, queryAlias)) {
+        if (queryAlias != null && owned.contains(queryAlias)) {
             return true;
         }
         // 有「xxx:upload」时，允许访问「xxx:list」（文件列表页）
         String uploadAlias = toUploadAlias(permission);
-        return uploadAlias != null && matchPermissionDirect(userId, uploadAlias);
+        return uploadAlias != null && owned.contains(uploadAlias);
     }
 
     @Override
@@ -135,15 +141,6 @@ public class PermissionServiceImpl implements PermissionService {
             }
         }
         return result;
-    }
-
-    private boolean matchPermissionDirect(Long userId, String permission) {
-        Set<Long> menuIds = collectExpandedMenuIdsForUser(userId);
-        if (CollUtil.isEmpty(menuIds)) {
-            return false;
-        }
-        List<MenuDO> menus = listMenusByIds(menuIds);
-        return menus.stream().anyMatch(menu -> permission.equals(menu.getPermission()));
     }
 
     /** 仅有 query 时，允许访问同资源的 list 接口（列表页只读） */
@@ -169,48 +166,11 @@ public class PermissionServiceImpl implements PermissionService {
     }
 
     private Set<String> loadUserPermissionCodes(Long userId) {
-        Set<Long> menuIds = collectExpandedMenuIdsForUser(userId);
-        if (CollUtil.isEmpty(menuIds)) {
+        if (userId == null) {
             return Collections.emptySet();
         }
-        Set<String> codes = new HashSet<>();
-        for (MenuDO menu : listMenusByIds(menuIds)) {
-            if (StringUtils.hasText(menu.getPermission())) {
-                codes.add(menu.getPermission());
-            }
-        }
-        return codes;
-    }
-
-    /** 汇总用户各角色菜单 ID，并补齐父级（与侧栏菜单树逻辑一致） */
-    private Set<Long> collectExpandedMenuIdsForUser(Long userId) {
-        Set<Long> roleIds = getUserRoleIdListByUserId(userId);
-        if (CollUtil.isEmpty(roleIds)) {
-            return Collections.emptySet();
-        }
-        Set<Long> menuIds = new HashSet<>();
-        for (Long roleId : roleIds) {
-            menuIds.addAll(getRoleMenuListByRoleId(roleId));
-        }
-        if (CollUtil.isEmpty(menuIds)) {
-            return Collections.emptySet();
-        }
-        return expandMenuClosure(menuIds);
-    }
-
-    private List<MenuDO> listMenusByIds(Collection<Long> ids) {
-        return listMenusByIds(ids, false);
-    }
-
-    private List<MenuDO> listMenusByIds(Collection<Long> ids, boolean includeDisabled) {
-        if (CollUtil.isEmpty(ids)) {
-            return Collections.emptyList();
-        }
-        LambdaQueryWrapper<MenuDO> wrapper = new LambdaQueryWrapper<MenuDO>().in(MenuDO::getId, ids);
-        if (!includeDisabled) {
-            wrapper.eq(MenuDO::getStatus, 1);
-        }
-        return menuMapper.selectList(wrapper);
+        List<String> codes = menuMapper.selectPermissionCodesByUserId(userId);
+        return new HashSet<>(codes);
     }
 
     @Override
@@ -229,30 +189,34 @@ public class PermissionServiceImpl implements PermissionService {
 
     @Override
     public List<MenuDO> getUserMenuList(Long userId) {
-        Set<Long> roleIds = getUserRoleIdListByUserId(userId);
-        if (CollUtil.isEmpty(roleIds)) {
+        if (userId == null) {
             return new ArrayList<>();
         }
-        Set<Long> menuIds = new HashSet<>();
-        for (Long roleId : roleIds) {
-            menuIds.addAll(getRoleMenuListByRoleId(roleId));
-        }
-        if (CollUtil.isEmpty(menuIds)) {
+        // 一次 JOIN 取回该用户被授权的全部菜单（含目录与按钮）
+        List<MenuDO> granted = menuMapper.selectMenusByUserId(userId);
+        if (CollUtil.isEmpty(granted)) {
             return new ArrayList<>();
         }
-        menuIds = expandMenuClosure(menuIds);
-        List<MenuDO> allMenus = menuMapper.selectList(new LambdaQueryWrapper<MenuDO>()
-                .orderByAsc(MenuDO::getSort)
-                .orderByAsc(MenuDO::getId));
-        Map<Long, MenuDO> allById = allMenus.stream()
-                .collect(Collectors.toMap(MenuDO::getId, m -> m, (a, b) -> a));
-        List<MenuDO> menus = listMenusByIds(menuIds).stream()
-                .filter(m -> !hasDisabledAncestor(m.getParentId(), allById))
+        // 侧栏只需要 type!=3 的目录/页面；按钮权限由权限码集合单独判定
+        List<MenuDO> visible = granted.stream()
+                .filter(m -> m.getType() == null || m.getType() != 3)
+                .filter(m -> m.getStatus() != null && m.getStatus() == 1)
                 .collect(Collectors.toList());
-        menus.sort(Comparator
+        if (visible.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 判断祖先是否被停用需要完整菜单树（授权集合里可能不含未授权的中间层级）
+        Map<Long, MenuDO> allById = new HashMap<>();
+        for (MenuDO menu : menuMapper.selectList(null)) {
+            allById.put(menu.getId(), menu);
+        }
+        visible.removeIf(m -> hasDisabledAncestor(m.getParentId(), allById));
+
+        visible.sort(Comparator
                 .comparing(MenuDO::getSort, Comparator.nullsLast(Integer::compareTo))
                 .thenComparing(MenuDO::getId, Comparator.nullsLast(Long::compareTo)));
-        return menus;
+        return visible;
     }
 
     private boolean hasDisabledAncestor(Long parentId, Map<Long, MenuDO> allById) {

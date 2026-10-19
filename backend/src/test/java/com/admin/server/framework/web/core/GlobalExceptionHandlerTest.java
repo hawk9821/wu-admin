@@ -3,6 +3,7 @@ package com.admin.server.framework.web.core;
 import com.admin.server.common.exception.BusinessException;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.framework.config.DynamicConfigProvider;
+import com.admin.server.framework.security.api.PermissionDeniedException;
 import cn.dev33.satoken.exception.NotLoginException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
@@ -18,7 +19,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
@@ -94,7 +94,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("handleAccessDenied：返回 403")
     void handleAccessDenied_returns403() {
-        CommonResult<Void> result = handler.handleAccessDenied(new AccessDeniedException("denied"));
+        CommonResult<Void> result = handler.handleAccessDenied(new PermissionDeniedException("denied"));
 
         assertEquals(403, result.getCode());
         assertEquals("权限不足，无法访问", result.getMessage());

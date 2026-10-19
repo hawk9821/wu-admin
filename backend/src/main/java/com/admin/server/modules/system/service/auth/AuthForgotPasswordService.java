@@ -28,6 +28,7 @@ public class AuthForgotPasswordService {
         if (StrUtil.isBlank(username)) {
             return null;
         }
+        // 找回密码发生在登录前的公共端点，按用户名定位用户
         return userMapper.selectByUsernameRaw(username.trim());
     }
 
@@ -60,7 +61,7 @@ public class AuthForgotPasswordService {
     }
 
     public String sendResetCode(UserDO user, String clientIp, String sliderToken, String offsetXStr) {
-        return profileSmsPasswordService.sendResetCode(user, clientIp, sliderToken, offsetXStr);
+        return profileSmsPasswordService.sendResetCode(user, clientIp, sliderToken, offsetXStr, "forgot");
     }
 
     public String resetPasswordBySms(UserDO user, String smsCode, String newPassword, String confirmPassword) {
@@ -77,6 +78,7 @@ public class AuthForgotPasswordService {
         if (err != null) {
             return err;
         }
+        // 落库更新密码
         userMapper.updateById(user);
         return null;
     }

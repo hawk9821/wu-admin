@@ -1,7 +1,7 @@
 package com.admin.server.framework.security.api;
 
 /**
- * 权限校验 SPI（由 system 模块实现，供 @PreAuthorize("@ss.hasPermission(...)") 使用）
+ * 权限校验 SPI（由 system 模块实现，供 {@link RequirePermission} 求值）
  */
 public interface PermissionApi {
 

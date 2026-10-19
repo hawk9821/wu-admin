@@ -7,6 +7,7 @@ import { flattenPostTree } from '@/utils/org-tree'
 import type { DeptVO, PostVO, RoleVO } from '@/types/system'
 import type { UserVO } from '@/types/user'
 import { logger } from '@/utils/logger'
+import { encryptSm2 } from '@/utils/crypto'
 import { getShallowBackFallback, safeNavigateBack } from '@/utils/navigate-back'
 
 function buildPostLabel(ids: number[], postMap: Map<number, PostVO>) {
@@ -206,7 +207,8 @@ export function useUserEditForm(options?: { backFallback?: string | (() => strin
         await createUser({
           ...payload,
           username: form.username.trim(),
-          password: form.password.trim(),
+          // 与 PC 端新增用户保持一致：口令走 SM2 传输加密
+          password: encryptSm2(form.password.trim()),
         })
       } else {
         await updateUser({ id, ...payload, username: user.value!.username })

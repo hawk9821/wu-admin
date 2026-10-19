@@ -1,5 +1,5 @@
 <template>
-  <PermissionBlock v-if="!allowed" />
+  <PermissionBlock v-if="!canAccess" />
   <view v-else class="page-padded page-list api-page">
     <ModuleDarkHero
       title="API 访问统计"
@@ -274,7 +274,9 @@ import { getApiAccessPage } from '@/api/monitor/api-access'
 import { formatDateTime, formatPercent } from '@/utils/format'
 import type { ApiAccessLogRow } from '@/types/system'
 
-const { allowed } = useModulePermission('monitor:apiAccess:query')
+const { allowed, hasPerm } = useModulePermission('monitor:apiAccess:query')
+// 与 PC 端保持一致：查询按钮权限或菜单权限任一命中即可进入页面
+const canAccess = computed(() => allowed.value || hasPerm('monitor:apiAccess:list'))
 
 const {
   stats,

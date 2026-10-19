@@ -1,5 +1,5 @@
 <template>
-  <view class="stat-grid" :class="{ 'stat-grid--cols-2': columns === 2 }">
+  <view class="stat-grid" :class="`stat-grid--cols-${columns}`">
     <view
       v-for="item in items"
       :key="item.label"
@@ -41,6 +41,26 @@ withDefaults(
 
 .stat-grid--cols-2 {
   grid-template-columns: repeat(2, 1fr);
+}
+
+.stat-grid--cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12rpx;
+}
+
+.stat-grid--cols-4 .stat-grid__item {
+  padding: 18rpx 10rpx;
+  text-align: center;
+}
+
+.stat-grid--cols-4 .stat-grid__value {
+  font-size: 32rpx;
+}
+
+.stat-grid--cols-4 .stat-grid__label {
+  margin-top: 4rpx;
+  font-size: 20rpx;
+  white-space: nowrap;
 }
 
 .stat-grid__item {

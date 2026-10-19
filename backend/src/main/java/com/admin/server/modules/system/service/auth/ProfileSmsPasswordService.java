@@ -39,8 +39,10 @@ public class ProfileSmsPasswordService {
     private PasswordEncoder passwordEncoder;
     @Resource
     private SliderCaptchaService sliderCaptchaService;
+    @Resource
+    private com.admin.server.framework.security.core.service.VerificationCodeGuard verificationCodeGuard;
 
-    public String sendResetCode(UserDO user, String clientIp, String sliderToken, String offsetXStr) {
+    public String sendResetCode(UserDO user, String clientIp, String sliderToken, String offsetXStr, String scene) {
         if (user == null || user.getId() == null) {
             return "用户不存在";
         }
@@ -51,7 +53,7 @@ public class ProfileSmsPasswordService {
         if (phone == null) {
             return "请先在基本资料中绑定手机号";
         }
-        String sliderErr = sliderCaptchaService.verifyAndConsume(sliderToken, offsetXStr);
+        String sliderErr = sliderCaptchaService.verifyAndConsume(sliderToken, offsetXStr, scene, clientIp);
         if (sliderErr != null) {
             return sliderErr;
         }
@@ -91,36 +93,52 @@ public class ProfileSmsPasswordService {
         if (code.isEmpty()) {
             return "请输入短信验证码";
         }
+        // 口令可能是 SM2 密文：先解密再校验长度与一致性
+        String plainPassword = systemConfigHelper.decryptPasswordIfEncrypted(newPassword);
+        String plainConfirm = StrUtil.isBlank(confirmPassword)
+                ? null
+                : systemConfigHelper.decryptPasswordIfEncrypted(confirmPassword);
+        if (StrUtil.isBlank(plainPassword)) {
+            return "请输入新密码";
+        }
         int minLen = systemConfigHelper.getRegisterMinPasswordLength();
-        if (newPassword == null || newPassword.length() < minLen) {
+        if (plainPassword.length() < minLen) {
             return "新密码长度不能少于 " + minLen + " 位";
         }
-        if (StrUtil.isNotBlank(confirmPassword) && !newPassword.equals(confirmPassword)) {
+        if (plainConfirm != null && !plainPassword.equals(plainConfirm)) {
             return "两次输入的新密码不一致";
         }
         String verifyErr = verifySmsCode(user.getId(), phone, code);
         if (verifyErr != null) {
             return verifyErr;
         }
-        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPassword(passwordEncoder.encode(plainPassword));
         return null;
     }
 
     private String verifySmsCode(Long userId, String phone, String code) {
+        String subject = "user:" + userId;
+        String guardErr = verificationCodeGuard.check("sms-reset", subject);
+        if (guardErr != null) {
+            return guardErr;
+        }
         RBucket<String> bucket = redissonClient.getBucket(PROFILE_RESET_SMS_KEY + userId);
         String cached = bucket.get();
         if (cached != null && cached.equalsIgnoreCase(code)) {
             bucket.delete();
+            verificationCodeGuard.clear("sms-reset", subject);
             return null;
         }
         if (systemConfigHelper.isAliyunAuthSmsProvider()) {
             boolean pass = aliyunDypnsSmsVerifyService.verifyCode(phone, code);
             if (pass) {
                 bucket.delete();
+                verificationCodeGuard.clear("sms-reset", subject);
                 return null;
             }
         }
-        return "短信验证码不正确，请重新获取";
+        String recordErr = verificationCodeGuard.recordFailure("sms-reset", subject);
+        return recordErr != null ? recordErr : "短信验证码不正确，请重新获取";
     }
 
     private String normalizeMobile(String mobile) {

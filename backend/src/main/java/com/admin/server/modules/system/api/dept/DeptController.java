@@ -1,5 +1,6 @@
 package com.admin.server.modules.system.api.dept;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
@@ -11,7 +12,6 @@ import com.admin.server.modules.system.service.dept.DeptService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -26,7 +26,7 @@ public class DeptController {
 
     @GetMapping("/tree")
     @Operation(summary = "部门树")
-    @PreAuthorize("@ss.hasRead('system:dept:list')")
+    @RequirePermission(value = "system:dept:list", type = RequirePermission.Type.READ)
     public CommonResult<List<DeptRespVO>> tree(
             @RequestParam(required = false) String name,
             @RequestParam(required = false) Integer status) {
@@ -36,7 +36,7 @@ public class DeptController {
 
     @GetMapping("/list")
     @Operation(summary = "部门扁平列表（表单下拉）")
-    @PreAuthorize("@ss.hasRead('system:dept:list')")
+    @RequirePermission(value = "system:dept:list", type = RequirePermission.Type.READ)
     public CommonResult<List<DeptRespVO>> list() {
         List<DeptDO> list = deptService.listAll();
         return CommonResult.success(DeptConvert.convertDeptList(list));
@@ -44,7 +44,7 @@ public class DeptController {
 
     @GetMapping("/get")
     @Operation(summary = "部门详情")
-    @PreAuthorize("@ss.hasPermission('system:dept:query')")
+    @RequirePermission("system:dept:query")
     public CommonResult<DeptRespVO> get(@RequestParam Long id) {
         DeptDO dept = deptService.getById(id);
         return CommonResult.success(DeptConvert.convertDept(dept));
@@ -53,7 +53,7 @@ public class DeptController {
     @Log(title = "部门管理", businessType = Log.BusinessType.INSERT)
     @PostMapping("/create")
     @Operation(summary = "新增部门")
-    @PreAuthorize("@ss.hasPermission('system:dept:create')")
+    @RequirePermission("system:dept:create")
     public CommonResult<Long> create(@RequestBody DeptDO dept) {
         deptService.create(dept);
         return CommonResult.success(dept.getId());
@@ -62,7 +62,7 @@ public class DeptController {
     @Log(title = "部门管理", businessType = Log.BusinessType.UPDATE)
     @PutMapping("/update")
     @Operation(summary = "修改部门")
-    @PreAuthorize("@ss.hasPermission('system:dept:update')")
+    @RequirePermission("system:dept:update")
     public CommonResult<Boolean> update(@RequestBody DeptDO dept) {
         deptService.update(dept);
         return CommonResult.success(true);
@@ -71,7 +71,7 @@ public class DeptController {
     @Log(title = "部门管理", businessType = Log.BusinessType.DELETE)
     @DeleteMapping("/delete")
     @Operation(summary = "删除部门")
-    @PreAuthorize("@ss.hasPermission('system:dept:delete')")
+    @RequirePermission("system:dept:delete")
     public CommonResult<Boolean> delete(@RequestParam Long id) {
         deptService.delete(id);
         return CommonResult.success(true);
@@ -80,7 +80,7 @@ public class DeptController {
     @Log(title = "部门管理", businessType = Log.BusinessType.UPDATE)
     @PutMapping("/move")
     @Operation(summary = "拖拽移动部门")
-    @PreAuthorize("@ss.hasPermission('system:dept:update')")
+    @RequirePermission("system:dept:update")
     public CommonResult<Boolean> move(
             @RequestParam Long id,
             @RequestParam Long parentId,
@@ -91,7 +91,7 @@ public class DeptController {
 
     @PutMapping("/update-status")
     @Operation(summary = "更新部门状态")
-    @PreAuthorize("@ss.hasPermission('system:dept:update')")
+    @RequirePermission("system:dept:update")
     public CommonResult<Boolean> updateStatus(@RequestParam Long id, @RequestParam Integer status) {
         deptService.updateStatus(id, status);
         return CommonResult.success(true);
@@ -99,7 +99,7 @@ public class DeptController {
 
     @GetMapping("/recycle/page")
     @Operation(summary = "部门回收站分页")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     public CommonResult<PageResult<DeptRespVO>> recyclePage(PageParam pageParam,
             @RequestParam(required = false) String name,
             @RequestParam(required = false) Integer status) {
@@ -109,7 +109,7 @@ public class DeptController {
 
     @PutMapping("/restore")
     @Operation(summary = "恢复部门")
-    @PreAuthorize("@ss.hasRecycleRestore('system:dept:delete')")
+    @RequirePermission(value = "system:dept:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     public CommonResult<Boolean> restore(@RequestParam Long id) {
         deptService.restore(id);
         return CommonResult.success(true);
@@ -117,7 +117,7 @@ public class DeptController {
 
     @DeleteMapping("/delete-permanent")
     @Operation(summary = "彻底删除部门")
-    @PreAuthorize("@ss.hasRecycleDelete('system:dept:delete')")
+    @RequirePermission(value = "system:dept:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {
         deptService.deletePermanent(id);
         return CommonResult.success(true);

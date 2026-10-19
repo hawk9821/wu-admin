@@ -104,6 +104,12 @@ public class PromptAssembler {
                     menu.isEmpty() ? "舍弃" : "仅顶级", menuFull.length(), budget);
         }
 
+        // ---- 核心原则：AI 问答优先检索本地 Markdown 知识库内容并置顶注入 ----
+        String referenceBlock = safeRetrieve(latestUserQuery);
+        if (StrUtil.isNotBlank(referenceBlock)) {
+            sb.append('\n').append(referenceBlock).append('\n');
+        }
+
         if (StrUtil.isNotBlank(knowledge)) {
             sb.append("\n<project_knowledge>\n").append(knowledge).append("\n</project_knowledge>\n");
         }
@@ -113,11 +119,6 @@ public class PromptAssembler {
         }
         if (StrUtil.isNotBlank(userCtx)) {
             sb.append("\n<user_context>\n").append(userCtx).append("\n</user_context>\n");
-        }
-        // ---- L2 知识库检索注入（设计 §4）：依本轮最新提问检索 reference_data，失败不阻断 ----
-        String referenceBlock = safeRetrieve(latestUserQuery);
-        if (StrUtil.isNotBlank(referenceBlock)) {
-            sb.append('\n').append(referenceBlock).append('\n');
         }
         // 模型级自定义提示词作为补充（语气/领域微调），位于全局知识与上下文之后
         if (StrUtil.isNotBlank(modelSystemPrompt)) {

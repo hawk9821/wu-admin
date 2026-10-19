@@ -191,15 +191,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Search, Refresh } from '@element-plus/icons-vue'
 import ModulePageIcon from '@/components/ModulePageIcon.vue'
 import { MODULE_PAGE_ICON } from '@/constants/module-page-icons'
 import ListExportButton from '@/components/ListExportButton.vue'
 import type { ECharts } from 'echarts'
 import type { CallbackDataParams } from 'echarts/types/dist/shared'
-import { useUserStore } from '@/store/user'
-import { hasMenuPermission } from '@/directives/permission'
+import { hasPermission } from '@/directives/permission'
 import {
   getApiAccessPage,
   getApiAccessStatistics,
@@ -215,8 +214,9 @@ import {
 const tableHeaderStyle = { textAlign: 'center' as const }
 const tableCellStyle = { textAlign: 'center' as const }
 
-const userStore = useUserStore()
-const canQuery = computed(() => hasMenuPermission(userStore.menus, 'monitor:apiAccess:query'))
+const canQuery = computed(() =>
+  hasPermission(['monitor:apiAccess:query', 'monitor:apiAccess:list'])
+)
 
 const stats = reactive<ApiAccessStatsView>(createEmptyApiAccessStats())
 
@@ -415,13 +415,28 @@ function handleResize() {
 
 let statsTimer: ReturnType<typeof setInterval> | null = null
 
-onMounted(() => {
+function initData() {
   if (!canQuery.value) return
   loadStatistics()
   loadPage()
-  statsTimer = setInterval(loadStatistics, 10000)
+  if (!statsTimer) {
+    statsTimer = setInterval(loadStatistics, 10000)
+  }
+}
+
+onMounted(() => {
+  initData()
   window.addEventListener('resize', handleResize)
 })
+
+watch(
+  canQuery,
+  (val) => {
+    if (val && tableData.value.length === 0 && !loading.value) {
+      initData()
+    }
+  },
+)
 
 onUnmounted(() => {
   if (statsTimer) clearInterval(statsTimer)

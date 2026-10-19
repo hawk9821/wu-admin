@@ -16,6 +16,10 @@ public abstract class AbstractQuartzJob implements Job {
 
     @Override
     public void execute(JobExecutionContext context) {
+        runJob(context);
+    }
+
+    private void runJob(JobExecutionContext context) {
         SysJobDO job = (SysJobDO) context.getMergedJobDataMap().get(ScheduleUtils.TASK_PROPERTIES);
         SysJobLogDO jobLog = new SysJobLogDO();
         jobLog.setJobName(job.getJobName());

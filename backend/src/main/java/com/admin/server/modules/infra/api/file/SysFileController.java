@@ -1,25 +1,28 @@
 package com.admin.server.modules.infra.api.file;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.framework.log.annotation.Log;
 import com.admin.server.common.exception.BusinessException;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
+import com.admin.server.framework.storage.FileContentTypes;
 import com.admin.server.modules.infra.dal.dataobject.file.SysFileDO;
 import com.admin.server.modules.system.service.config.SystemConfigHelper;
 import com.admin.server.modules.infra.service.file.SysFileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.Data;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.annotation.Resource;
 import java.io.IOException;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -37,7 +40,7 @@ public class SysFileController {
 
     @GetMapping("/upload-policy")
     @Operation(summary = "上传策略（读取系统配置，保存后立即生效）")
-    @PreAuthorize("@ss.hasRead('sys:file:list')")
+    @RequirePermission(value = "sys:file:list", type = RequirePermission.Type.READ)
     public CommonResult<Map<String, Object>> uploadPolicy() {
         Map<String, Object> policy = new HashMap<>();
         policy.put("maxSizeMb", systemConfigHelper.getFileMaxSizeMb());
@@ -47,7 +50,7 @@ public class SysFileController {
     }
 
     @GetMapping("/page-by-group")
-    @PreAuthorize("@ss.hasRead('sys:file:list')")
+    @RequirePermission(value = "sys:file:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<SysFileDO>> pageByGroup(
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "20") Integer pageSize,
@@ -60,14 +63,14 @@ public class SysFileController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("@ss.hasRead('sys:file:list')")
+    @RequirePermission(value = "sys:file:list", type = RequirePermission.Type.READ)
     public CommonResult<SysFileDO> detail(@PathVariable Long id) {
-        return CommonResult.success(fileService.getById(id));
+        return CommonResult.success(fileService.getAccessibleById(id));
     }
 
     @Log(title = "文件管理", businessType = Log.BusinessType.INSERT, isSaveRequestData = false)
     @PostMapping("/upload")
-    @PreAuthorize("@ss.hasPermission('sys:file:upload')")
+    @RequirePermission("sys:file:upload")
     public CommonResult<SysFileDO> upload(
             @RequestParam("file") MultipartFile file,
             @RequestParam(required = false) String path,
@@ -76,53 +79,69 @@ public class SysFileController {
     }
 
     @PostMapping("/upload/image")
-    @PreAuthorize("@ss.hasPermission('sys:file:upload')")
+    @RequirePermission("sys:file:upload")
     public CommonResult<SysFileDO> uploadImage(@RequestParam("file") MultipartFile file) {
         return CommonResult.success(fileService.uploadImage(file));
     }
 
     @GetMapping("/download/{id}")
-    @PreAuthorize("@ss.hasRead('sys:file:list')")
+    @RequirePermission(value = "sys:file:list", type = RequirePermission.Type.READ)
     public ResponseEntity<org.springframework.core.io.Resource> download(@PathVariable Long id) throws IOException {
-        SysFileDO file = fileService.getById(id);
-        if (file == null) {
-            return ResponseEntity.notFound().build();
-        }
+        SysFileDO file = fileService.getAccessibleById(id);
         org.springframework.core.io.Resource resource = fileService.openFileResource(id);
-        String encoded = URLEncoder.encode(file.getOriginalName(), StandardCharsets.UTF_8).replace("+", "%20");
+        String downloadName = StringUtils.hasText(file.getOriginalName())
+                ? file.getOriginalName()
+                : StringUtils.hasText(file.getFileName()) ? file.getFileName() : "download";
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encoded)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment()
+                                .filename(downloadName, StandardCharsets.UTF_8)
+                                .build()
+                                .toString())
                 .header(HttpHeaders.CONTENT_TYPE, contentTypeOf(file))
                 .header(HttpHeaders.ACCEPT_RANGES, "bytes")
                 .body(resource);
     }
 
     @GetMapping("/preview/{id}")
-    @PreAuthorize("@ss.hasRead('sys:file:list')")
+    @RequirePermission(value = "sys:file:list", type = RequirePermission.Type.READ)
     public ResponseEntity<org.springframework.core.io.Resource> preview(@PathVariable Long id) throws IOException {
-        SysFileDO file = fileService.getById(id);
-        if (file == null) {
-            return ResponseEntity.notFound().build();
-        }
+        SysFileDO file = fileService.getAccessibleById(id);
         org.springframework.core.io.Resource resource = fileService.openFileResource(id);
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_TYPE, contentTypeOf(file))
+        String contentType = contentTypeOf(file);
+        String fileName = StringUtils.hasText(file.getOriginalName())
+                ? file.getOriginalName()
+                : StringUtils.hasText(file.getFileName()) ? file.getFileName() : "download";
+
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
+                .header("X-Content-Type-Options", "nosniff")
                 .header(HttpHeaders.ACCEPT_RANGES, "bytes")
-                .header(HttpHeaders.CACHE_CONTROL, "private, max-age=3600")
-                .body(resource);
+                .header(HttpHeaders.CACHE_CONTROL, "private, max-age=3600");
+        if (FileContentTypes.shouldForceDownload(contentType)) {
+            // SVG/HTML/可执行内容等一律下载，避免同源存储型 XSS
+            builder.header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE);
+            builder.header(HttpHeaders.CONTENT_DISPOSITION,
+                    ContentDisposition.attachment()
+                            .filename(fileName, StandardCharsets.UTF_8)
+                            .build()
+                            .toString());
+        } else {
+            builder.header(HttpHeaders.CONTENT_TYPE, contentType);
+        }
+        return builder.body(resource);
     }
 
     private static String contentTypeOf(SysFileDO file) {
-        return file.getFileType() != null ? file.getFileType() : "application/octet-stream";
+        String fileName = StringUtils.hasText(file.getOriginalName())
+                ? file.getOriginalName()
+                : file.getFileName();
+        return FileContentTypes.resolve(fileName, file.getFileType(), null);
     }
 
     @GetMapping("/text/{id}")
-    @PreAuthorize("@ss.hasRead('sys:file:list')")
+    @RequirePermission(value = "sys:file:list", type = RequirePermission.Type.READ)
     public CommonResult<String> text(@PathVariable Long id) {
-        SysFileDO file = fileService.getById(id);
-        if (file == null) {
-            throw new BusinessException(404, "文件不存在");
-        }
+        SysFileDO file = fileService.getAccessibleById(id);
         if (file.getFileSize() != null && file.getFileSize() > 5 * 1024 * 1024) {
             throw new BusinessException(400, "文件过大，无法预览");
         }
@@ -131,7 +150,7 @@ public class SysFileController {
 
     @Log(title = "文件管理", businessType = Log.BusinessType.DELETE)
     @DeleteMapping("/{id}")
-    @PreAuthorize("@ss.hasPermission('sys:file:delete')")
+    @RequirePermission("sys:file:delete")
     public CommonResult<Boolean> delete(@PathVariable Long id) {
         fileService.delete(id);
         return CommonResult.success(true);
@@ -139,7 +158,7 @@ public class SysFileController {
 
     @Log(title = "文件管理", businessType = Log.BusinessType.DELETE)
     @DeleteMapping("/batch")
-    @PreAuthorize("@ss.hasPermission('sys:file:delete')")
+    @RequirePermission("sys:file:delete")
     public CommonResult<Boolean> deleteBatch(@RequestBody Long[] ids) {
         fileService.deleteBatch(ids);
         return CommonResult.success(true);
@@ -147,7 +166,7 @@ public class SysFileController {
 
     @Log(title = "文件管理", businessType = Log.BusinessType.UPDATE)
     @PostMapping("/move")
-    @PreAuthorize("@ss.hasPermission('sys:file:upload')")
+    @RequirePermission("sys:file:upload")
     public CommonResult<Boolean> move(@RequestBody MoveFileRequest request) {
         fileService.moveToGroup(request.getFileIds(), request.getGroupId());
         return CommonResult.success(true);
@@ -155,14 +174,14 @@ public class SysFileController {
 
     @Log(title = "文件管理", businessType = Log.BusinessType.UPDATE)
     @PutMapping("/{id}/rename")
-    @PreAuthorize("@ss.hasPermission('sys:file:upload')")
+    @RequirePermission("sys:file:upload")
     public CommonResult<Boolean> rename(@PathVariable Long id, @RequestBody RenameRequest request) {
         fileService.rename(id, request.getNewName());
         return CommonResult.success(true);
     }
 
     @GetMapping("/recycle/page")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     @Operation(summary = "文件回收站分页")
     public CommonResult<PageResult<SysFileDO>> recyclePage(
             PageParam pageParam,
@@ -171,7 +190,7 @@ public class SysFileController {
     }
 
     @PutMapping("/restore")
-    @PreAuthorize("@ss.hasRecycleRestore('sys:file:delete')")
+    @RequirePermission(value = "sys:file:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     @Operation(summary = "恢复文件")
     public CommonResult<Boolean> restore(@RequestParam Long id) {
         fileService.restore(id);
@@ -179,7 +198,7 @@ public class SysFileController {
     }
 
     @DeleteMapping("/delete-permanent")
-    @PreAuthorize("@ss.hasRecycleDelete('sys:file:delete')")
+    @RequirePermission(value = "sys:file:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     @Operation(summary = "彻底删除文件")
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {
         fileService.deletePermanent(id);

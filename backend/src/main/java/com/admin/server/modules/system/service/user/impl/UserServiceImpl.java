@@ -5,16 +5,19 @@ import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
 import com.admin.server.modules.system.enums.ErrorCodeConstants;
 import com.admin.server.framework.security.core.service.TokenService;
+import com.admin.server.framework.security.core.service.SecurityUtils;
 import com.admin.server.modules.system.api.user.vo.AssignRoleReqVO;
 import com.admin.server.modules.system.api.user.vo.UserCreateReqVO;
 import com.admin.server.modules.system.api.user.vo.UserUpdateReqVO;
 import com.admin.server.modules.system.dal.dataobject.dept.DeptDO;
 import com.admin.server.modules.system.dal.dataobject.loginlog.LoginLogDO;
 import com.admin.server.modules.system.dal.dataobject.post.PostDO;
+import com.admin.server.modules.system.dal.dataobject.permission.RoleDO;
 import com.admin.server.modules.system.dal.dataobject.user.UserDO;
 import com.admin.server.modules.system.dal.dataobject.user.UserPostDO;
 import com.admin.server.modules.system.dal.mysql.dept.DeptMapper;
 import com.admin.server.modules.system.dal.mysql.loginlog.LoginLogMapper;
+import com.admin.server.modules.system.dal.mysql.permission.RoleMapper;
 import com.admin.server.modules.system.dal.mysql.post.PostMapper;
 import com.admin.server.modules.system.dal.mysql.user.UserMapper;
 import com.admin.server.modules.system.dal.mysql.user.UserPostMapper;
@@ -22,6 +25,7 @@ import com.admin.server.modules.system.service.auth.LoginLockService;
 import com.admin.server.modules.system.service.auth.vo.LoginLockStatusVO;
 import com.admin.server.modules.system.service.dept.DeptService;
 import com.admin.server.modules.system.service.permission.PermissionService;
+import com.admin.server.modules.system.service.permission.DataScopeService;
 import com.admin.server.modules.system.service.permission.event.UserPermissionChangedEvent;
 import com.admin.server.modules.system.service.user.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -33,6 +37,7 @@ import org.springframework.stereotype.Service;
 import com.admin.server.modules.infra.framework.operlog.OperLogDiffUtils;
 import com.admin.server.modules.infra.framework.operlog.OperLogContext;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -51,9 +56,13 @@ public class UserServiceImpl implements UserService {
     @Resource
     private UserMapper userMapper;
     @Resource
+    private RoleMapper roleMapper;
+    @Resource
     private DeptMapper deptMapper;
     @Resource
     private PermissionService permissionService;
+    @Resource
+    private DataScopeService dataScopeService;
     @Resource
     private TokenService tokenService;
     @Resource
@@ -71,15 +80,23 @@ public class UserServiceImpl implements UserService {
     @Resource
     private ApplicationEventPublisher eventPublisher;
 
+    @Resource
+    private com.admin.server.modules.system.service.config.SystemConfigHelper systemConfigHelper;
+
     @Override
     public List<UserDO> listAll() {
-        return userMapper.selectListForOptions(LIST_ALL_MAX);
+        LambdaQueryWrapper<UserDO> wrapper = new LambdaQueryWrapper<>();
+        dataScopeService.applyUserScope(wrapper);
+        wrapper.orderByAsc(UserDO::getId).last("LIMIT " + LIST_ALL_MAX);
+        return userMapper.selectList(wrapper);
     }
 
     @Override
     public PageResult<UserDO> page(PageParam pageParam, String keyword, String username, String mobile,
                                     Integer status, Long deptId, Long postId, Boolean loginLocked) {
         LambdaQueryWrapper<UserDO> wrapper = new LambdaQueryWrapper<>();
+        // 组织隔离：仅能查看当前角色数据范围内的用户
+        dataScopeService.applyUserScope(wrapper);
         if (keyword != null && !keyword.isEmpty()) {
             wrapper.and(w -> w.like(UserDO::getUsername, keyword)
                     .or().like(UserDO::getNickname, keyword)
@@ -129,28 +146,44 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserDO getDetail(Long id) {
-        UserDO user = userMapper.selectById(id);
-        if (user != null) {
-            fillUserDisplayFields(Collections.singletonList(user));
-            fillLoginLockFields(Collections.singletonList(user));
+        LambdaQueryWrapper<UserDO> wrapper = new LambdaQueryWrapper<UserDO>().eq(UserDO::getId, id);
+        dataScopeService.applyUserScope(wrapper);
+        UserDO user = userMapper.selectOne(wrapper);
+        if (user == null) {
+            throw new BusinessException(403, "无权查看该用户");
         }
+        fillUserDisplayFields(Collections.singletonList(user));
+        fillLoginLockFields(Collections.singletonList(user));
         return user;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createUser(UserCreateReqVO reqVO) {
+        requireVisibleDept(reqVO.getDeptId());
         UserDO user = new UserDO();
         user.setUsername(reqVO.getUsername());
-        user.setPassword(passwordEncoder.encode(reqVO.getPassword()));
+        // 后台创建用户同样支持 SM2 密文口令，解密后再校验明文长度并哈希
+        String plainPassword = decryptAndValidatePassword(reqVO.getPassword(), "密码不能为空");
+        user.setPassword(passwordEncoder.encode(plainPassword));
         user.setNickname(reqVO.getNickname());
         user.setMobile(reqVO.getMobile());
         user.setEmail(reqVO.getEmail());
         user.setStatus(1);
         user.setDeptId(reqVO.getDeptId());
         userMapper.insert(user);
-        if (reqVO.getRoleId() != null) {
-            permissionService.assignUserRole(user.getId(), Collections.singleton(reqVO.getRoleId()));
+        Long assignRoleId = reqVO.getRoleId();
+        if (assignRoleId == null) {
+            String defaultRoleCode = systemConfigHelper.getRegisterDefaultRoleCode();
+            RoleDO defaultRole = roleMapper.selectOne(new LambdaQueryWrapper<RoleDO>()
+                    .eq(RoleDO::getCode, defaultRoleCode)
+                    .eq(RoleDO::getDeleted, 0));
+            if (defaultRole != null) {
+                assignRoleId = defaultRole.getId();
+            }
+        }
+        if (assignRoleId != null) {
+            permissionService.assignUserRole(user.getId(), Collections.singleton(assignRoleId));
         }
         saveUserPosts(user.getId(), reqVO.getPostIds());
         return user.getId();
@@ -159,11 +192,9 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateUser(UserUpdateReqVO reqVO) {
-        UserDO user = userMapper.selectById(reqVO.getId());
-        if (user == null) {
-            throw new BusinessException(ErrorCodeConstants.USER_NOT_EXISTS);
-        }
-        
+        UserDO user = requireVisibleUser(reqVO.getId());
+        requireVisibleDept(reqVO.getDeptId());
+
         // 计算变更明细并记录操作日志
         List<String> diffItems = OperLogDiffUtils.diff(user, reqVO);
         if (!diffItems.isEmpty()) {
@@ -190,6 +221,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteUser(Long id) {
+        requireVisibleUser(id);
         userPostMapper.deleteByUserId(id);
         userMapper.deleteById(id);
     }
@@ -198,7 +230,11 @@ public class UserServiceImpl implements UserService {
     public PageResult<UserDO> recyclePage(PageParam pageParam, String username,
                                             String mobile, Integer status, Long deptId) {
         Page<UserDO> page = new Page<>(pageParam.getPageNo(), pageParam.getPageSize());
-        Page<UserDO> deletedPage = (Page<UserDO>) userMapper.selectDeletedPage(page, username, mobile, status, deptId);
+        DataScopeService.DataScopeContext scope = dataScopeService.getCurrentScope();
+        List<Long> visibleDeptIds = scope.all() ? null : scope.deptIds();
+        String selfUsername = scope.selfOnly() ? SecurityUtils.getLoginUsername() : null;
+        Page<UserDO> deletedPage = (Page<UserDO>) userMapper.selectDeletedPage(
+                page, username, mobile, status, deptId, visibleDeptIds, selfUsername);
         List<UserDO> users = deletedPage.getRecords();
         if (!users.isEmpty()) {
             Set<Long> deptIds = users.stream().map(UserDO::getDeptId).filter(id -> id != null).collect(Collectors.toSet());
@@ -220,6 +256,13 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void restore(Long id) {
+        UserDO deleted = userMapper.selectDeletedById(id);
+        if (deleted == null) {
+            throw new BusinessException(404, "回收站用户不存在");
+        }
+        if (!dataScopeService.isDeptVisible(deleted.getDeptId())) {
+            throw new BusinessException(403, "无权恢复该用户");
+        }
         int rows = userMapper.restoreById(id);
         if (rows == 0) {
             throw new BusinessException(404, "回收站用户不存在");
@@ -228,6 +271,13 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void deletePermanent(Long id) {
+        UserDO deleted = userMapper.selectDeletedById(id);
+        if (deleted == null) {
+            throw new BusinessException(404, "回收站用户不存在");
+        }
+        if (!dataScopeService.isDeptVisible(deleted.getDeptId())) {
+            throw new BusinessException(403, "无权删除该用户");
+        }
         int rows = userMapper.deletePhysicalById(id);
         if (rows == 0) {
             throw new BusinessException(404, "回收站用户不存在");
@@ -236,45 +286,56 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public Set<Long> getRoleIds(Long userId) {
+        requireVisibleUser(userId);
         return permissionService.getUserRoleIdListByUserId(userId);
     }
 
     @Override
     public void assignRole(AssignRoleReqVO reqVO) {
+        requireVisibleUser(reqVO.getUserId());
         permissionService.assignUserRole(reqVO.getUserId(), reqVO.getRoleIds());
     }
 
     @Override
     public void updateStatus(Long id, Integer status) {
-        UserDO user = userMapper.selectById(id);
-        if (user == null) {
-            throw new BusinessException(ErrorCodeConstants.USER_NOT_EXISTS);
-        }
+        UserDO user = requireVisibleUser(id);
         user.setStatus(status);
         userMapper.updateById(user);
     }
 
     @Override
     public void resetPassword(Long id, String rawPassword) {
-        UserDO user = userMapper.selectById(id);
-        if (user == null) {
-            throw new BusinessException(ErrorCodeConstants.USER_NOT_EXISTS);
-        }
-        user.setPassword(passwordEncoder.encode(rawPassword));
+        UserDO user = requireVisibleUser(id);
+        // 后台重置密码同样可能收到 SM2 密文，先解密再校验明文长度并哈希
+        String plainPassword = decryptAndValidatePassword(rawPassword, "新密码不能为空");
+        user.setPassword(passwordEncoder.encode(plainPassword));
         userMapper.updateById(user);
+    }
+
+    /**
+     * 解密前端可能提交的 SM2 密文口令，并按明文规则校验长度。
+     * 明文长度规则与前端表单保持一致：6~50 个字符。
+     */
+    private String decryptAndValidatePassword(String rawPassword, String emptyMessage) {
+        String plainPassword = systemConfigHelper.decryptPasswordIfEncrypted(rawPassword);
+        if (!StringUtils.hasText(plainPassword)) {
+            throw new BusinessException(400, emptyMessage);
+        }
+        if (plainPassword.length() < 6 || plainPassword.length() > 50) {
+            throw new BusinessException(400, "密码长度 6~50 个字符");
+        }
+        return plainPassword;
     }
 
     @Override
     public void kickOut(Long userId) {
+        requireVisibleUser(userId);
         tokenService.removeToken(userId);
     }
 
     @Override
     public void unlockLogin(Long id) {
-        UserDO user = userMapper.selectById(id);
-        if (user == null) {
-            throw new BusinessException(ErrorCodeConstants.USER_NOT_EXISTS);
-        }
+        UserDO user = requireVisibleUser(id);
         if (user.getUsername() == null || user.getUsername().isBlank()) {
             throw new BusinessException(400, "用户名为空，无法解除锁定");
         }
@@ -286,6 +347,32 @@ public class UserServiceImpl implements UserService {
     }
 
     // ---- 私有方法 ----
+
+    /**
+     * 按 ID 取用户并校验当前数据范围；写操作统一走这里，避免只靠列表过滤。
+     */
+    private UserDO requireVisibleUser(Long id) {
+        UserDO user = userMapper.selectById(id);
+        if (user == null) {
+            throw new BusinessException(ErrorCodeConstants.USER_NOT_EXISTS);
+        }
+        if (!dataScopeService.isUserVisible(id)) {
+            throw new BusinessException(403, "无权操作该用户");
+        }
+        return user;
+    }
+
+    /**
+     * 校验目标部门在当前数据范围内；null 表示不调整部门。
+     */
+    private void requireVisibleDept(Long deptId) {
+        if (deptId == null) {
+            return;
+        }
+        if (!dataScopeService.isDeptVisible(deptId)) {
+            throw new BusinessException(403, "无权将用户归属到该部门");
+        }
+    }
 
     private void fillUserDisplayFields(List<UserDO> users) {
         if (users == null || users.isEmpty()) {

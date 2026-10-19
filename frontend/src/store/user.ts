@@ -6,7 +6,7 @@ import type { LoginForm, AuthInfo } from '@/types/api'
 import { useMessageStore } from '@/store/message'
 import { useTagsViewStore } from '@/store/tagsView'
 import { resetMonitorBackground } from '@/composables/useMonitorBackground'
-import { resetSecurityConfig, requestSessionSignKey } from '@/utils/security-config'
+import { resetSecurityConfig, requestSessionSignKey, setSecurityConfig } from '@/utils/security-config'
 import http from '@/utils/request'
 
 /** 登录后内存中的用户信息（与 /auth/info 字段子集一致） */
@@ -32,11 +32,21 @@ export const useUserStore = defineStore('user', () => {
 
   const loginAction = async (loginForm: LoginForm) => {
     const res = await login(loginForm)
-    // 登录成功后，立刻尝试初始化签名密钥。即使获取失败也绝不打断登录主流程（由后续拦截器自愈机制兜底）
-    try {
-      await initSessionKey()
-    } catch (e) {
-      console.warn('初始化会话密钥失败，由后续拦截器自愈机制兜底:', e)
+    // 优先使用服务端随登录响应原子下发的会话临时密钥（零时延、零网络竞态）
+    const signKey = (res.data as any)?.sm3SignKey
+    const sm4Key = (res.data as any)?.sm4Key
+    if (signKey || sm4Key) {
+      setSecurityConfig({
+        sm3SignKey: signKey,
+        sm4Key: sm4Key,
+      })
+    } else {
+      // 兼容兜底：若未返回则再异步尝试协商拉取
+      try {
+        await initSessionKey()
+      } catch (e) {
+        console.warn('初始化会话密钥失败，由后续拦截器自愈机制兜底:', e)
+      }
     }
     userInfo.value = {
       userId: res.data.userId,
@@ -73,7 +83,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   const logout = () => {
-    // 登出时，清空签名密钥闭包配置！
+    // 登出时，清空签名密钥闭包配置
     resetSecurityConfig()
     try {
       useMessageStore().destroyWebSocket()

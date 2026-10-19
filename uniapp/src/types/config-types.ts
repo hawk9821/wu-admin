@@ -72,9 +72,17 @@ export interface SecurityAdminConfig {
   disableDevtool: boolean
   isConcurrent: boolean
   sm4EncryptEnabled?: boolean
+  /** 是否启用登录/注册/重置密码等国密 SM2 传输加密（默认开启） */
+  sm2EncryptEnabled?: boolean
   sm2SignEnabled?: boolean
+  /** 是否启用接口 HMAC-SM3 签名（与 sm2SignEnabled 同义，后端配置中仍保留该字段） */
+  sm3SignEnabled?: boolean
   timestampEnabled?: boolean
   nonceEnabled?: boolean
+  /** 风险分触发临时封禁（1 小时）的阈值 */
+  riskBlockScore?: number
+  /** 风险分触发 24 小时封禁的阈值 */
+  riskBanScore?: number
   sm4SecretKey?: string
 }
 
@@ -94,9 +102,78 @@ export interface SmsAdminConfig {
   codeExpireMinutes: number
 }
 
+export type StorageEngineType = 'local' | 'minio' | 'cos' | 'oss'
+
 export interface FileStorageConfig {
+  type?: StorageEngineType
+  localPath?: string
+  localDomain?: string
+  minioDomain?: string
+  minioEndpoint?: string
+  minioAccessKey?: string
+  minioSecretKey?: string
+  minioBucket?: string
+  cosRegion?: string
+  cosBucket?: string
+  cosSecretId?: string
+  cosSecretKey?: string
+  cosDomain?: string
+  ossEndpoint?: string
+  ossBucket?: string
+  ossAccessKeyId?: string
+  ossAccessKeySecret?: string
+  ossDomain?: string
   maxSizeMb: number
   allowedExtensions: string
+}
+
+export interface StorageConfigVO {
+  type: StorageEngineType
+  localPath: string
+  localDomain: string
+  minioDomain: string
+  minioEndpoint: string
+  minioAccessKey: string
+  minioBucket: string
+  minioSecretKeyConfigured: boolean
+  cosRegion: string
+  cosBucket: string
+  cosSecretId: string
+  cosDomain: string
+  cosSecretKeyConfigured: boolean
+  ossEndpoint: string
+  ossBucket: string
+  ossAccessKeyId: string
+  ossDomain: string
+  ossAccessKeySecretConfigured: boolean
+  maxSizeMb: number
+  allowedExtensions: string
+  activeType: StorageEngineType
+  activeBucket: string
+  healthy: boolean
+}
+
+export interface StorageConfigDTO {
+  type: StorageEngineType
+  localPath?: string
+  localDomain?: string
+  minioDomain?: string
+  minioEndpoint?: string
+  minioAccessKey?: string
+  minioSecretKey?: string
+  minioBucket?: string
+  cosRegion?: string
+  cosBucket?: string
+  cosSecretId?: string
+  cosSecretKey?: string
+  cosDomain?: string
+  ossEndpoint?: string
+  ossBucket?: string
+  ossAccessKeyId?: string
+  ossAccessKeySecret?: string
+  ossDomain?: string
+  maxSizeMb?: number
+  allowedExtensions?: string
 }
 
 export interface RateLimitConfig {
@@ -109,6 +186,12 @@ export interface RateLimitConfig {
   smsPerIpDaily: number
   /** AI 对话：单用户每分钟请求次数上限（0 表示不限制） */
   aiChatPerUserMinute: number
+  /** 通用业务 API：单 IP 每分钟请求上限（应用层滑动窗口兜底，0 表示不限制） */
+  apiPerIpMinute?: number
+  /** 认证接口：单 IP 每分钟请求上限（应用层滑动窗口兜底，0 表示不限制） */
+  authPerIpMinute?: number
+  /** 文件访问：单 IP 每分钟请求上限（应用层滑动窗口兜底，0 表示不限制） */
+  filesPerIpMinute?: number
 }
 
 /** AI 对话角色级每日 token 配额项 */
@@ -176,6 +259,10 @@ export interface SecurityPublicConfig {
   /** 是否启用接口 HMAC-SM3 签名（sm2SignEnabled 为历史开关名） */
   sm2SignEnabled?: boolean
   sm3SignEnabled?: boolean
+  /** 是否启用高敏感口令 SM2 加密 */
+  sm2EncryptEnabled?: boolean
+  /** 后端下发的 SM2 公钥 */
+  sm2PublicKey?: string
 }
 
 export interface AiPublicConfig {

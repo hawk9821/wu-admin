@@ -1,5 +1,6 @@
 package com.admin.server.modules.ticket.api.approval;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
@@ -15,7 +16,6 @@ import com.admin.server.modules.ticket.service.approval.ApprovalFormService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,7 +31,7 @@ public class ApprovalFormController {
 
     @Operation(summary = "审批单分页")
     @GetMapping("/page")
-    @PreAuthorize("@ss.hasRead('system:approval:list')")
+    @RequirePermission(value = "system:approval:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<ApprovalFormDO>> page(PageParam pageParam,
             @RequestParam(required = false) String title,
             @RequestParam(required = false) String formType,
@@ -42,21 +42,21 @@ public class ApprovalFormController {
 
     @Operation(summary = "审批单详情")
     @GetMapping("/get")
-    @PreAuthorize("@ss.hasRead('system:approval:list')")
+    @RequirePermission(value = "system:approval:list", type = RequirePermission.Type.READ)
     public CommonResult<ApprovalFormDO> get(@RequestParam Long id) {
         return CommonResult.success(approvalFormService.get(id));
     }
 
     @Operation(summary = "审批单记录")
     @GetMapping("/record/list")
-    @PreAuthorize("@ss.hasRead('system:approval:list')")
+    @RequirePermission(value = "system:approval:list", type = RequirePermission.Type.READ)
     public CommonResult<List<ApprovalRecordDO>> recordList(@RequestParam Long formId) {
         return CommonResult.success(approvalFormService.recordList(formId));
     }
 
     @Operation(summary = "审批人下拉（排除当前用户）")
     @GetMapping("/approver-options")
-    @PreAuthorize("@ss.hasPermission('system:approval:create')")
+    @RequirePermission("system:approval:create")
     public CommonResult<List<ApprovalApproverOptionVO>> approverOptions() {
         return CommonResult.success(approvalFormService.listApproverOptions(SecurityUtils.getLoginUserIdOrZero()));
     }
@@ -64,7 +64,7 @@ public class ApprovalFormController {
     @Log(title = "审批单管理", businessType = Log.BusinessType.INSERT)
     @Operation(summary = "提交审批单")
     @PostMapping("/create")
-    @PreAuthorize("@ss.hasPermission('system:approval:create')")
+    @RequirePermission("system:approval:create")
     public CommonResult<Long> create(@Validated @RequestBody ApprovalCreateReqVO reqVO) {
         return CommonResult.success(approvalFormService.create(reqVO, SecurityUtils.getLoginUserIdOrZero()));
     }
@@ -72,7 +72,7 @@ public class ApprovalFormController {
     @Log(title = "审批单管理", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "审批操作")
     @PutMapping("/approve")
-    @PreAuthorize("@ss.hasPermission('system:approval:approve')")
+    @RequirePermission("system:approval:approve")
     public CommonResult<Boolean> approve(@Validated @RequestBody ApprovalApproveReqVO reqVO) {
         approvalFormService.approve(reqVO, SecurityUtils.getLoginUserIdOrZero());
         return CommonResult.success(true);
@@ -81,7 +81,7 @@ public class ApprovalFormController {
     @Log(title = "审批单管理", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "归档审批单")
     @PutMapping("/archive")
-    @PreAuthorize("@ss.hasPermission('system:approval:archive')")
+    @RequirePermission("system:approval:archive")
     public CommonResult<Boolean> archive(@Validated @RequestBody ApprovalArchiveReqVO reqVO) {
         approvalFormService.archive(reqVO, SecurityUtils.getLoginUserIdOrZero());
         return CommonResult.success(true);
@@ -90,7 +90,7 @@ public class ApprovalFormController {
     @Log(title = "审批单管理", businessType = Log.BusinessType.DELETE)
     @Operation(summary = "删除审批单")
     @DeleteMapping("/delete")
-    @PreAuthorize("@ss.hasPermission('system:approval:delete')")
+    @RequirePermission("system:approval:delete")
     public CommonResult<Boolean> delete(@RequestParam Long id) {
         approvalFormService.delete(id);
         return CommonResult.success(true);
@@ -98,7 +98,7 @@ public class ApprovalFormController {
 
     @Operation(summary = "审批单回收站分页")
     @GetMapping("/recycle/page")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     public CommonResult<PageResult<ApprovalFormDO>> recyclePage(PageParam pageParam,
             @RequestParam(required = false) String title,
             @RequestParam(required = false) String formType,
@@ -108,7 +108,7 @@ public class ApprovalFormController {
 
     @Operation(summary = "恢复审批单")
     @PutMapping("/restore")
-    @PreAuthorize("@ss.hasRecycleRestore('system:approval:delete')")
+    @RequirePermission(value = "system:approval:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     public CommonResult<Boolean> restore(@RequestParam Long id) {
         approvalFormService.restore(id);
         return CommonResult.success(true);
@@ -116,7 +116,7 @@ public class ApprovalFormController {
 
     @Operation(summary = "彻底删除审批单")
     @DeleteMapping("/delete-permanent")
-    @PreAuthorize("@ss.hasRecycleDelete('system:approval:delete')")
+    @RequirePermission(value = "system:approval:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {
         approvalFormService.deletePermanent(id);
         return CommonResult.success(true);

@@ -41,6 +41,8 @@ public class ProfileSmsMobileBindService {
     private UserMapper userMapper;
     @Resource
     private SliderCaptchaService sliderCaptchaService;
+    @Resource
+    private com.admin.server.framework.security.core.service.VerificationCodeGuard verificationCodeGuard;
 
     public String sendBindCode(Long userId, String newMobile, String clientIp, String sliderToken, String offsetXStr) {
         if (userId == null) {
@@ -64,7 +66,7 @@ public class ProfileSmsMobileBindService {
         if (exist != null) {
             return "该手机号已被其他账号使用";
         }
-        String sliderErr = sliderCaptchaService.verifyAndConsume(sliderToken, offsetXStr);
+        String sliderErr = sliderCaptchaService.verifyAndConsume(sliderToken, offsetXStr, "profile", clientIp);
         if (sliderErr != null) {
             return sliderErr;
         }
@@ -129,6 +131,11 @@ public class ProfileSmsMobileBindService {
     }
 
     private String verifyBindCode(Long userId, String phone, String code) {
+        String subject = "user:" + userId;
+        String guardErr = verificationCodeGuard.check("sms-bind", subject);
+        if (guardErr != null) {
+            return guardErr;
+        }
         RBucket<String> phoneBucket = redissonClient.getBucket(PROFILE_BIND_PHONE_KEY + userId);
         String pendingPhone = phoneBucket.get();
         if (pendingPhone == null || !pendingPhone.equals(phone)) {
@@ -139,6 +146,7 @@ public class ProfileSmsMobileBindService {
         if (cached != null && cached.equalsIgnoreCase(code)) {
             codeBucket.delete();
             phoneBucket.delete();
+            verificationCodeGuard.clear("sms-bind", subject);
             return null;
         }
         if (systemConfigHelper.isAliyunAuthSmsProvider()) {
@@ -146,10 +154,12 @@ public class ProfileSmsMobileBindService {
             if (pass) {
                 codeBucket.delete();
                 phoneBucket.delete();
+                verificationCodeGuard.clear("sms-bind", subject);
                 return null;
             }
         }
-        return "短信验证码不正确，请重新获取";
+        String recordErr = verificationCodeGuard.recordFailure("sms-bind", subject);
+        return recordErr != null ? recordErr : "短信验证码不正确，请重新获取";
     }
 
     private String normalizeMobile(String mobile) {

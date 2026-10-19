@@ -280,6 +280,9 @@ public class SysConfigGroupServiceImpl implements SysConfigGroupService {
             case SystemConfigHelper.GROUP_AI:
                 validateAiConfig(json);
                 break;
+            case SystemConfigHelper.GROUP_SECURITY:
+                validateSecurityConfig(json);
+                break;
             default:
                 break;
         }
@@ -325,6 +328,23 @@ public class SysConfigGroupServiceImpl implements SysConfigGroupService {
         validateDailyLimit(json.getInt("smsPerPhoneDaily", 10), "手机号每日短信");
         validateDailyLimit(json.getInt("smsPerIpDaily", 30), "IP 每日短信");
         validateRate(json.getInt("aiChatPerUserMinute", 8), "AI 对话每分钟");
+        validateRateWithMax(json.getInt("apiPerIpMinute", 240), "业务 API", 2000);
+        validateRateWithMax(json.getInt("authPerIpMinute", 60), "认证接口", 600);
+        validateRateWithMax(json.getInt("filesPerIpMinute", 600), "文件访问", 5000);
+    }
+
+    private void validateSecurityConfig(JSONObject json) {
+        int block = json.getInt("riskBlockScore", 80);
+        int ban = json.getInt("riskBanScore", 120);
+        if (block < 20 || block > 1000) {
+            throw new BusinessException("临时封禁阈值须在 20～1000 之间");
+        }
+        if (ban < 40 || ban > 2000) {
+            throw new BusinessException("24 小时封禁阈值须在 40～2000 之间");
+        }
+        if (ban <= block) {
+            throw new BusinessException("24 小时封禁阈值必须高于临时封禁阈值");
+        }
     }
 
     private void validateAiConfig(JSONObject json) {
@@ -368,6 +388,12 @@ public class SysConfigGroupServiceImpl implements SysConfigGroupService {
     private void validateRate(int n, String label) {
         if (n < 0 || n > 200) {
             throw new BusinessException(label + "每分钟限流须在 0～200 之间（0 表示不限制）");
+        }
+    }
+
+    private void validateRateWithMax(int n, String label, int max) {
+        if (n < 0 || n > max) {
+            throw new BusinessException(label + "每分钟限流须在 0～" + max + " 之间（0 表示不限制）");
         }
     }
 

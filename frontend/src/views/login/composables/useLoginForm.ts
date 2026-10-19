@@ -13,6 +13,8 @@ import {
   loadLoginRemember,
   saveLoginRemember,
 } from '@/utils/loginRemember'
+import { getSecurityConfig } from '@/utils/security-config'
+import { encryptSm2 } from '@/utils/crypto'
 
 type CaptchaMode = 'image' | 'slider'
 type LoginMode = 'account' | 'sms' | 'email'
@@ -387,10 +389,14 @@ export function useLoginForm() {
           rememberMe: formData.rememberMe,
         }
       } else {
+        const secConfig = getSecurityConfig()
+        const encryptedPassword = secConfig.sm2EncryptEnabled && secConfig.sm2PublicKey
+          ? encryptSm2(formData.password, secConfig.sm2PublicKey)
+          : formData.password
         loginData = {
           loginType: 'account',
           username: formData.username,
-          password: formData.password,
+          password: encryptedPassword,
           rememberMe: formData.rememberMe,
         }
         if (captchaEnabled.value && captchaType.value === 'slider') {

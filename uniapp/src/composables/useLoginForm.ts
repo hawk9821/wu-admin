@@ -14,6 +14,7 @@ import { startSessionServices } from '@/composables/useSessionServices'
 import { toCaptchaDataUrl } from '@/utils/captcha'
 import { navigateToRegister } from '@/utils/auth-route'
 import { logger } from '@/utils/logger'
+import { encryptSm2 } from '@/utils/crypto'
 
 type CaptchaMode = 'image' | 'slider'
 type LoginMode = 'account' | 'sms' | 'email'
@@ -321,7 +322,7 @@ export function useLoginForm() {
       if (loginMode.value === 'account') {
         loginData.loginType = 'account'
         loginData.username = formData.username.trim()
-        loginData.password = formData.password
+        loginData.password = encryptSm2(formData.password)
         if (captchaEnabled.value) {
           if (captchaType.value === 'slider') {
             if (!sliderCaptcha) return

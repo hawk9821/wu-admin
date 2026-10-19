@@ -480,6 +480,14 @@
             "navigationBarTitleText": "文件预览",
             "navigationStyle": "custom"
           }
+        },
+        {
+          "path": "security/index",
+          "style": {
+            "navigationBarTitleText": "安全风控",
+            "navigationStyle": "custom",
+            "enablePullDownRefresh": true
+          }
         }
       ]
     },
@@ -574,6 +582,21 @@
           "path": "log/detail",
           "style": {
             "navigationBarTitleText": "日志详情",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "knowledge/index",
+          "style": {
+            "navigationBarTitleText": "AI 知识库",
+            "navigationStyle": "custom",
+            "enablePullDownRefresh": true
+          }
+        },
+        {
+          "path": "knowledge/edit",
+          "style": {
+            "navigationBarTitleText": "编辑知识",
             "navigationStyle": "custom"
           }
         }

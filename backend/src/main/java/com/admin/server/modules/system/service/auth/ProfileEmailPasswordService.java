@@ -65,11 +65,19 @@ public class ProfileEmailPasswordService {
             return "请输入邮箱验证码";
         }
 
+        // 口令可能是 SM2 密文：先解密再校验长度与一致性
+        String plainPassword = systemConfigHelper.decryptPasswordIfEncrypted(newPassword);
+        String plainConfirm = StrUtil.isBlank(confirmPassword)
+                ? null
+                : systemConfigHelper.decryptPasswordIfEncrypted(confirmPassword);
+        if (StrUtil.isBlank(plainPassword)) {
+            return "请输入新密码";
+        }
         int minLen = systemConfigHelper.getRegisterMinPasswordLength();
-        if (newPassword == null || newPassword.length() < minLen) {
+        if (plainPassword.length() < minLen) {
             return "新密码长度不能少于 " + minLen + " 位";
         }
-        if (StrUtil.isNotBlank(confirmPassword) && !newPassword.equals(confirmPassword)) {
+        if (plainConfirm != null && !plainPassword.equals(plainConfirm)) {
             return "两次输入的新密码不一致";
         }
 
@@ -78,7 +86,7 @@ public class ProfileEmailPasswordService {
             return err;
         }
 
-        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPassword(passwordEncoder.encode(plainPassword));
         userMapper.updateById(user);
         return null;
     }

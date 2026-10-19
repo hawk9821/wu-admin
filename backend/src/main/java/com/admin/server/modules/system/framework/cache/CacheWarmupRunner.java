@@ -3,6 +3,8 @@ package com.admin.server.modules.system.framework.cache;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.Resource;
@@ -12,6 +14,7 @@ import jakarta.annotation.Resource;
  */
 @Slf4j
 @Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
 public class CacheWarmupRunner implements ApplicationRunner {
 
     @Resource

@@ -1,5 +1,6 @@
 package com.admin.server.modules.system.api.dict;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
@@ -12,7 +13,6 @@ import com.admin.server.modules.system.service.dict.DictDataService;
 import com.admin.server.modules.system.service.dict.DictTypeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.annotation.Resource;
@@ -32,7 +32,7 @@ public class DictTypeController {
 
     @GetMapping("/page")
     @Operation(summary = "字典类型分页")
-    @PreAuthorize("@ss.hasRead('system:dict:list')")
+    @RequirePermission(value = "system:dict:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<DictTypeRespVO>> page(
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "10") Integer pageSize,
@@ -45,7 +45,7 @@ public class DictTypeController {
 
     @GetMapping("/list")
     @Operation(summary = "启用字典类型列表")
-    @PreAuthorize("@ss.hasRead('system:dict:list')")
+    @RequirePermission(value = "system:dict:list", type = RequirePermission.Type.READ)
     public CommonResult<List<DictTypeRespVO>> list() {
         List<DictTypeDO> list = dictTypeService.listEnabled();
         return CommonResult.success(BeanMappingUtils.copyListProperties(list, DictTypeRespVO.class));
@@ -53,7 +53,7 @@ public class DictTypeController {
 
     @GetMapping("/{id}")
     @Operation(summary = "字典类型详情")
-    @PreAuthorize("@ss.hasRead('system:dict:list')")
+    @RequirePermission(value = "system:dict:list", type = RequirePermission.Type.READ)
     public CommonResult<DictTypeRespVO> detail(@PathVariable Long id) {
         DictTypeDO type = dictTypeService.getById(id);
         return CommonResult.success(BeanMappingUtils.copyProperties(type, DictTypeRespVO.class));
@@ -61,7 +61,7 @@ public class DictTypeController {
 
     @GetMapping("/{id}/export")
     @Operation(summary = "导出字典类型及数据")
-    @PreAuthorize("@ss.hasRead('system:dict:list')")
+    @RequirePermission(value = "system:dict:list", type = RequirePermission.Type.READ)
     public CommonResult<Map<String, Object>> export(@PathVariable Long id) {
         DictTypeDO type = dictTypeService.getById(id);
         List<DictDataDO> data = dictDataService.listByDictTypeForManage(type.getDictType());
@@ -73,7 +73,7 @@ public class DictTypeController {
 
     @PostMapping
     @Operation(summary = "新增字典类型")
-    @PreAuthorize("@ss.hasPermission('system:dict:create')")
+    @RequirePermission("system:dict:create")
     @Log(title = "字典类型", businessType = Log.BusinessType.INSERT)
     public CommonResult<Boolean> create(@RequestBody DictTypeDO dictType) {
         dictTypeService.create(dictType);
@@ -82,7 +82,7 @@ public class DictTypeController {
 
     @PutMapping
     @Operation(summary = "修改字典类型")
-    @PreAuthorize("@ss.hasPermission('system:dict:update')")
+    @RequirePermission("system:dict:update")
     @Log(title = "字典类型", businessType = Log.BusinessType.UPDATE)
     public CommonResult<Boolean> update(@RequestBody DictTypeDO dictType) {
         dictTypeService.update(dictType);
@@ -91,7 +91,7 @@ public class DictTypeController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除字典类型（级联删除数据）")
-    @PreAuthorize("@ss.hasPermission('system:dict:delete')")
+    @RequirePermission("system:dict:delete")
     @Log(title = "字典类型", businessType = Log.BusinessType.DELETE)
     public CommonResult<Boolean> delete(@PathVariable Long id) {
         dictTypeService.delete(id);
@@ -100,7 +100,7 @@ public class DictTypeController {
 
     @PostMapping("/{id}/copy")
     @Operation(summary = "复制字典类型及数据")
-    @PreAuthorize("@ss.hasPermission('system:dict:copy')")
+    @RequirePermission("system:dict:copy")
     @Log(title = "字典类型", businessType = Log.BusinessType.INSERT)
     public CommonResult<Boolean> copy(@PathVariable Long id) {
         dictTypeService.copy(id);
@@ -109,7 +109,7 @@ public class DictTypeController {
 
     @GetMapping("/recycle/page")
     @Operation(summary = "字典类型回收站分页")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     public CommonResult<PageResult<DictTypeRespVO>> recyclePage(PageParam pageParam,
                                                             @RequestParam(required = false) String dictName,
                                                             @RequestParam(required = false) String dictType) {
@@ -119,7 +119,7 @@ public class DictTypeController {
 
     @PutMapping("/restore")
     @Operation(summary = "恢复字典类型")
-    @PreAuthorize("@ss.hasRecycleRestore('system:dict:delete')")
+    @RequirePermission(value = "system:dict:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     public CommonResult<Boolean> restore(@RequestParam Long id) {
         dictTypeService.restore(id);
         return CommonResult.success(true);
@@ -127,7 +127,7 @@ public class DictTypeController {
 
     @DeleteMapping("/delete-permanent")
     @Operation(summary = "彻底删除字典类型")
-    @PreAuthorize("@ss.hasRecycleDelete('system:dict:delete')")
+    @RequirePermission(value = "system:dict:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {
         dictTypeService.deletePermanent(id);
         return CommonResult.success(true);

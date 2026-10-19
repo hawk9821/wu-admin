@@ -33,15 +33,14 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 @Service
 public class ProfileServiceImpl implements ProfileService {
 
     private static final long AVATAR_MAX_BYTES = 2L * 1024 * 1024;
-    private static final String AVATAR_PATH_PREFIX = "images/avatar/";
+    private static final Set<String> AVATAR_EXTENSIONS =
+            Set.of(".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp");
 
     @Resource
     private UserMapper userMapper;
@@ -60,7 +59,7 @@ public class ProfileServiceImpl implements ProfileService {
     @Resource
     private PasswordEncoder passwordEncoder;
     @Resource
-    private LocalFileStorage localFileStorage;
+    private com.admin.server.framework.storage.RoutingFileStorageService routingFileStorageService;
     @Resource
     private SystemConfigHelper systemConfigHelper;
     @Resource
@@ -193,21 +192,28 @@ public class ProfileServiceImpl implements ProfileService {
         if (!StringUtils.hasText(reqVO.getOldPassword()) || !StringUtils.hasText(reqVO.getNewPassword())) {
             throw new BusinessException(400, "请填写原密码和新密码");
         }
+        // 口令可能在传输层用 SM2 加密，统一在后端解密后再做长度与一致性校验，
+        // 否则密文长度会被误判成“密码过长”，旧密码也永远匹配不上。
+        String oldPassword = systemConfigHelper.decryptPasswordIfEncrypted(reqVO.getOldPassword());
+        String newPassword = systemConfigHelper.decryptPasswordIfEncrypted(reqVO.getNewPassword());
+        String confirmPassword = StringUtils.hasText(reqVO.getConfirmPassword())
+                ? systemConfigHelper.decryptPasswordIfEncrypted(reqVO.getConfirmPassword())
+                : null;
+
         int minLen = systemConfigHelper.getRegisterMinPasswordLength();
-        if (reqVO.getNewPassword().length() < minLen) {
+        if (newPassword.length() < minLen) {
             throw new BusinessException(400, "新密码长度不能少于 " + minLen + " 位");
         }
-        if (Objects.equals(reqVO.getOldPassword(), reqVO.getNewPassword())) {
+        if (Objects.equals(oldPassword, newPassword)) {
             throw new BusinessException(400, "新密码不能与原密码相同");
         }
-        if (StringUtils.hasText(reqVO.getConfirmPassword())
-                && !Objects.equals(reqVO.getNewPassword(), reqVO.getConfirmPassword())) {
+        if (confirmPassword != null && !Objects.equals(newPassword, confirmPassword)) {
             throw new BusinessException(400, "两次输入的新密码不一致");
         }
-        if (!passwordEncoder.matches(reqVO.getOldPassword(), user.getPassword())) {
+        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
             throw new BusinessException(400, "原密码不正确");
         }
-        user.setPassword(passwordEncoder.encode(reqVO.getNewPassword()));
+        user.setPassword(passwordEncoder.encode(newPassword));
         userMapper.updateById(user);
     }
 
@@ -215,7 +221,7 @@ public class ProfileServiceImpl implements ProfileService {
     public String sendPasswordResetSmsCode(Long userId, ProfilePasswordSmsCodeReqVO reqVO, String clientIp) {
         UserDO user = requireUser(userId);
         checkDemoUser(user);
-        return profileSmsPasswordService.sendResetCode(user, clientIp, reqVO.getUuid(), reqVO.getCode());
+        return profileSmsPasswordService.sendResetCode(user, clientIp, reqVO.getUuid(), reqVO.getCode(), "profile");
     }
 
     @Override
@@ -262,20 +268,51 @@ public class ProfileServiceImpl implements ProfileService {
         if (file.getSize() > AVATAR_MAX_BYTES) {
             throw new BusinessException(400, "头像大小不能超过 2MB");
         }
-        String suffix = LocalFileStorage.getSuffix(file.getOriginalFilename());
-        if (!StringUtils.hasText(suffix)) {
-            suffix = ".jpg";
+        String extension = LocalFileStorage.getSuffix(file.getOriginalFilename()).toLowerCase(Locale.ROOT);
+        if (!AVATAR_EXTENSIONS.contains(extension)) {
+            throw new BusinessException(400, "头像仅支持 jpg、jpeg、png、gif、webp、bmp 格式");
         }
-        String fileName = UUID.randomUUID().toString().replace("-", "") + suffix;
-        String storagePath = AVATAR_PATH_PREFIX + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+
+        // 规范化对象存储 ObjectKey: users/{username}/avatar/avatar_{hash}.{ext}
+        String objectKey = com.admin.server.framework.storage.StorageObjectKeyBuilder.userAvatar(
+                user.getId(), user.getUsername(), file.getOriginalFilename());
+
+        String storageType = routingFileStorageService.getStorageType();
+        String bucketName = resolveActiveBucket(storageType);
+
+        boolean uploaded = false;
         try {
-            String url = localFileStorage.upload(file.getInputStream(), storagePath, fileName);
+            String url = routingFileStorageService.uploadFile(bucketName, objectKey, file.getInputStream(), contentType);
+            uploaded = true;
             user.setAvatar(url);
-            userMapper.updateById(user);
+            int rows = userMapper.updateById(user);
+            if (rows == 0) {
+                throw new BusinessException(500, "头像保存失败");
+            }
             return url;
         } catch (IOException e) {
-            throw new BusinessException(500, "头像上传失败");
+            throw new BusinessException(500, "头像上传失败: " + e.getMessage());
+        } catch (RuntimeException e) {
+            if (uploaded) {
+                try {
+                    routingFileStorageService.deleteFileForRecord(storageType, bucketName, objectKey);
+                } catch (Exception cleanupError) {
+                    // 清理失败只记录日志，避免覆盖原始异常
+                }
+            }
+            throw e;
         }
+    }
+
+    private String resolveActiveBucket(String storageType) {
+        com.admin.server.framework.storage.StorageConfig cfg = routingFileStorageService.getCurrentConfig();
+        if (cfg == null) return "wu-admin";
+        return switch (storageType.toLowerCase()) {
+            case "minio" -> StringUtils.hasText(cfg.getMinioBucket()) ? cfg.getMinioBucket() : "wu-admin";
+            case "cos" -> StringUtils.hasText(cfg.getCosBucket()) ? cfg.getCosBucket() : "wu-admin";
+            case "oss" -> StringUtils.hasText(cfg.getOssBucket()) ? cfg.getOssBucket() : "wu-admin";
+            default -> "wu-admin";
+        };
     }
 
     @Override

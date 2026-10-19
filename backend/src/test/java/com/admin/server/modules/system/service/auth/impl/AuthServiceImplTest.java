@@ -76,6 +76,8 @@ class AuthServiceImplTest extends MybatisLambdaTestBase {
     private LoginLockService loginLockService;
     @Mock
     private SliderCaptchaService sliderCaptchaService;
+    @Mock
+    private com.admin.server.framework.security.core.service.VerificationCodeGuard verificationCodeGuard;
 
     @InjectMocks
     private AuthServiceImpl authService;

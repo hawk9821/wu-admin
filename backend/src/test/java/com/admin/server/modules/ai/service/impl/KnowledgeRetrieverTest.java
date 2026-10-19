@@ -53,8 +53,8 @@ class KnowledgeRetrieverTest {
 
         String block = retriever.retrieveReferenceBlock("密码找不回怎么办");
 
-        assertTrue(block.contains("<reference_data>"));
-        assertTrue(block.contains("</reference_data>"));
+        assertTrue(block.contains("<knowledge_base>"));
+        assertTrue(block.contains("</knowledge_base>"));
         assertTrue(block.contains("忘记密码找回"));
         assertTrue(block.contains("打开登录页点击忘记密码"));
     }

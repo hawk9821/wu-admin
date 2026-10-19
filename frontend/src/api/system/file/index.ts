@@ -29,10 +29,13 @@ export interface FileRecord {
   name?: string
   originalName?: string
   url?: string
+  filePath?: string
+  bucketName?: string
   fileType?: string
   size?: number
   fileSize?: number
   fileSuffix?: string
+  storageType?: string
   groupId?: number
   createTime?: string
 }
@@ -151,7 +154,7 @@ export function deleteFileBatch(ids: number[]) {
   return del('/system/file/batch', { data: ids })
 }
 
-export function moveFiles(fileIds: number[], groupId: number) {
+export function moveFiles(fileIds: number[], groupId: number | null) {
   return post('/system/file/move', { fileIds, groupId })
 }
 
@@ -177,9 +180,20 @@ function normalizeFileApiUrl(url: string): string {
   return url.startsWith('/') ? `/api${url}` : `/api/${url}`
 }
 
+/** 根据记录中的 bucket + objectKey 生成稳定的后端代理地址，兼容切换存储引擎前的旧记录 */
+function buildStorageProxyUrl(file: FileRecord): string {
+  if (!file.filePath || !file.bucketName) return ''
+  const key = file.filePath.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/')
+  return `/api/storage/files/${encodeURIComponent(file.bucketName)}/${key}`
+}
+
 /** 流式预览 URL（video/audio/img 直连，支持 Range，避免整文件 blob） */
 export function getStreamPreviewUrl(file?: FileRecord | null): string {
   if (!file) return ''
+  const proxy = buildStorageProxyUrl(file)
+  if (proxy) {
+    return withTokenQuery(proxy)
+  }
   const type = file.fileType || ''
   const direct = normalizeFileApiUrl(file.url || '')
   if (direct && (type.startsWith('video/') || type.startsWith('audio/') || type.startsWith('image/'))) {

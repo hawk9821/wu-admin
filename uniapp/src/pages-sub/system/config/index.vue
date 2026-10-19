@@ -40,19 +40,111 @@
       </view>
 
       <!-- 文件 -->
-      <view v-else-if="tab === 'file'" class="form-panel form-panel--file">
-        <FormCell label="单文件上限">
-          <NumberStepper v-model="fileDraft.maxSizeMb" :min="1" :max="platformMaxFileMb" :disabled="!canEdit" />
-          <text class="config-unit">MB（最高 {{ platformMaxFileMb }}）</text>
-        </FormCell>
-        <FormCell label="允许扩展名" class="form-cell--stacked" last>
-          <textarea
-            v-model="fileDraft.allowedExtensions"
-            class="config-boxed-textarea"
-            :disabled="!canEdit"
-            placeholder="逗号分隔，如 jpg,png,pdf"
-          />
-        </FormCell>
+      <view v-else-if="tab === 'file'" class="config-file-wrap">
+        <ConfigSectionCard title="存储引擎">
+          <view class="form-panel form-panel--flat">
+            <view class="storage-engine-grid">
+              <view
+                v-for="engine in storageEngineOptions"
+                :key="engine.type"
+                class="storage-engine"
+                :class="{ 'storage-engine--active': storageEngine === engine.type }"
+                @click="selectStorageEngine(engine.type)"
+              >
+                <view class="storage-engine__head">
+                  <text class="storage-engine__name">{{ engine.name }}</text>
+                  <text v-if="storageActiveType === engine.type" class="storage-engine__badge">当前生效</text>
+                </view>
+                <text class="storage-engine__desc">{{ engine.desc }}</text>
+              </view>
+            </view>
+            <view class="storage-status">
+              <text class="storage-status__label">当前生效引擎</text>
+              <text class="storage-status__value">{{ storageActiveLabel }}</text>
+              <text
+                class="storage-status__health"
+                :class="storageHealthy ? 'storage-status__health--ok' : 'storage-status__health--bad'"
+              >
+                {{ storageHealthy ? '连接正常' : '连接异常' }}
+              </text>
+            </view>
+          </view>
+        </ConfigSectionCard>
+
+        <ConfigSectionCard :title="`${storageSelectedLabel}参数`">
+          <view class="form-panel form-panel--flat">
+            <template v-if="storageEngine === 'local'">
+              <FormCell v-model="storageForm.localPath" label="存储根目录" editable boxed :disabled="!canEdit" placeholder="./data/uploads" />
+              <FormCell v-model="storageForm.localDomain" label="外网访问域名" editable boxed :disabled="!canEdit" placeholder="选填，如 https://files.example.com" last />
+            </template>
+            <template v-else-if="storageEngine === 'minio'">
+              <FormCell v-model="storageForm.minioEndpoint" label="服务端点" editable boxed :disabled="!canEdit" placeholder="http://127.0.0.1:9000" />
+              <FormCell v-model="storageForm.minioBucket" label="存储桶" editable boxed :disabled="!canEdit" placeholder="wu-admin" />
+              <FormCell v-model="storageForm.minioAccessKey" label="AccessKey" editable boxed :disabled="!canEdit" />
+              <FormCell
+                v-model="storageForm.minioSecretKey"
+                label="SecretKey"
+                editable
+                boxed
+                password
+                :disabled="!canEdit"
+                :placeholder="storageForm.minioSecretKeyConfigured ? '已配置，留空保持不变' : '请输入 SecretKey'"
+              />
+              <FormCell v-model="storageForm.minioDomain" label="外网访问域名" editable boxed :disabled="!canEdit" placeholder="选填" last />
+            </template>
+            <template v-else-if="storageEngine === 'cos'">
+              <FormCell v-model="storageForm.cosRegion" label="地域" editable boxed :disabled="!canEdit" placeholder="ap-guangzhou" />
+              <FormCell v-model="storageForm.cosBucket" label="存储桶" editable boxed :disabled="!canEdit" />
+              <FormCell v-model="storageForm.cosSecretId" label="SecretId" editable boxed :disabled="!canEdit" />
+              <FormCell
+                v-model="storageForm.cosSecretKey"
+                label="SecretKey"
+                editable
+                boxed
+                password
+                :disabled="!canEdit"
+                :placeholder="storageForm.cosSecretKeyConfigured ? '已配置，留空保持不变' : '请输入 SecretKey'"
+              />
+              <FormCell v-model="storageForm.cosDomain" label="CDN 加速域名" editable boxed :disabled="!canEdit" placeholder="选填" last />
+            </template>
+            <template v-else>
+              <FormCell v-model="storageForm.ossEndpoint" label="地域节点" editable boxed :disabled="!canEdit" placeholder="oss-cn-hangzhou.aliyuncs.com" />
+              <FormCell v-model="storageForm.ossBucket" label="存储空间" editable boxed :disabled="!canEdit" />
+              <FormCell v-model="storageForm.ossAccessKeyId" label="AccessKey ID" editable boxed :disabled="!canEdit" />
+              <FormCell
+                v-model="storageForm.ossAccessKeySecret"
+                label="AccessKey Secret"
+                editable
+                boxed
+                password
+                :disabled="!canEdit"
+                :placeholder="storageForm.ossAccessKeySecretConfigured ? '已配置，留空保持不变' : '请输入 AccessKey Secret'"
+              />
+              <FormCell v-model="storageForm.ossDomain" label="自定义域名" editable boxed :disabled="!canEdit" placeholder="选填" last />
+            </template>
+          </view>
+          <view v-if="canEdit" class="storage-actions">
+            <button class="storage-action-btn" :loading="storageTesting" @click="testStorageConnection">测试连通性</button>
+            <button class="storage-action-btn storage-action-btn--primary" :loading="storageSaving" @click="saveStorageConfig">保存并热重载</button>
+          </view>
+        </ConfigSectionCard>
+
+        <ConfigSectionCard title="上传策略">
+          <view class="form-panel form-panel--file form-panel--flat">
+            <FormCell label="单文件上限">
+              <NumberStepper v-model="fileDraft.maxSizeMb" :min="1" :max="platformMaxFileMb" :disabled="!canEdit" />
+              <text class="config-unit">MB（最高 {{ platformMaxFileMb }}）</text>
+            </FormCell>
+            <FormCell label="允许扩展名" class="form-cell--stacked" last>
+              <textarea
+                v-model="fileDraft.allowedExtensions"
+                class="config-boxed-textarea"
+                :disabled="!canEdit"
+                placeholder="逗号分隔，如 jpg,png,pdf"
+              />
+            </FormCell>
+          </view>
+        </ConfigSectionCard>
       </view>
 
       <!-- 限流 -->
@@ -65,6 +157,34 @@
         </FormCell>
         <FormCell label="注册(次/分/IP)">
           <NumberStepper v-model="rateDraft.registerPerIpMinute" :min="0" :max="200" :disabled="!canEdit" />
+        </FormCell>
+        <text class="config-section">应用层滑动窗口（兜底限流）</text>
+        <FormCell label="业务 API(次/分/IP)">
+          <NumberStepper
+            :model-value="rateDraft.apiPerIpMinute ?? 240"
+            :min="0"
+            :max="2000"
+            :disabled="!canEdit"
+            @update:model-value="rateDraft.apiPerIpMinute = $event"
+          />
+        </FormCell>
+        <FormCell label="认证接口(次/分/IP)">
+          <NumberStepper
+            :model-value="rateDraft.authPerIpMinute ?? 60"
+            :min="0"
+            :max="600"
+            :disabled="!canEdit"
+            @update:model-value="rateDraft.authPerIpMinute = $event"
+          />
+        </FormCell>
+        <FormCell label="文件访问(次/分/IP)">
+          <NumberStepper
+            :model-value="rateDraft.filesPerIpMinute ?? 600"
+            :min="0"
+            :max="5000"
+            :disabled="!canEdit"
+            @update:model-value="rateDraft.filesPerIpMinute = $event"
+          />
         </FormCell>
         <text class="config-section">短信发送防刷</text>
         <FormCell label="短信(次/分/IP)">
@@ -453,8 +573,15 @@
         <ConfigSectionCard title="API 安全防线与防重放">
           <view class="form-panel form-panel--flat">
             <FormCell
+              label="SM2 密码加密"
+              hint="是否启用登录/注册/重置密码非对称加密传输（国密 SM2 椭圆公钥加密，默认开启）"
+              switch-cell
+            >
+              <switch :checked="securityDraft.sm2EncryptEnabled ?? true" :disabled="!canEdit" @change="onSecuritySwitch('sm2EncryptEnabled', $event)" />
+            </FormCell>
+            <FormCell
               label="SM4 数据加密"
-              hint="是否启用接口请求/响应数据加密（国密 SM4-CBC 模式 + 16 字节随机 IV 向量）"
+              hint="是否启用接口请求/响应数据加密（国密 SM4-GCM 认证加密，IV[12] + 密文 + Tag[16]）"
               switch-cell
             >
               <switch :checked="securityDraft.sm4EncryptEnabled" :disabled="!canEdit" @change="onSecuritySwitch('sm4EncryptEnabled', $event)" />
@@ -480,6 +607,35 @@
               last
             >
               <switch :checked="securityDraft.nonceEnabled ?? true" :disabled="!canEdit" @change="onSecuritySwitch('nonceEnabled', $event)" />
+            </FormCell>
+          </view>
+        </ConfigSectionCard>
+        <ConfigSectionCard title="风险分自动封禁">
+          <view class="form-panel form-panel--flat">
+            <FormCell
+              label="临时封禁阈值"
+              hint="风险分达到后临时封禁 1 小时，默认 80"
+            >
+              <NumberStepper
+                :model-value="securityDraft.riskBlockScore ?? 80"
+                :min="20"
+                :max="1000"
+                :disabled="!canEdit"
+                @update:model-value="securityDraft.riskBlockScore = $event"
+              />
+            </FormCell>
+            <FormCell
+              label="24 小时封禁阈值"
+              hint="风险分达到后封禁 24 小时，必须高于临时封禁阈值，默认 120"
+              last
+            >
+              <NumberStepper
+                :model-value="securityDraft.riskBanScore ?? 120"
+                :min="40"
+                :max="2000"
+                :disabled="!canEdit"
+                @update:model-value="securityDraft.riskBanScore = $event"
+              />
             </FormCell>
           </view>
         </ConfigSectionCard>
@@ -606,7 +762,7 @@ import AppDialogHost from '@/components/common/AppDialogHost/index.vue'
 import { useConfigEditor } from '@/composables/useConfigEditor'
 import { useUnsavedLeaveGuard } from '@/composables/useUnsavedLeaveGuard'
 import { useModulePermission } from '@/composables/useModulePermission'
-import type { EmailAdminConfig } from '@/types/config-types'
+import type { EmailAdminConfig, StorageEngineType } from '@/types/config-types'
 import { showActionSheet, showConfirm } from '@/utils/app-dialog'
 import { appendNavFromParam } from '@/utils/nav-from'
 import { consumePagePickerResult, clearPagePickerResult } from '@/utils/page-picker-result'
@@ -635,12 +791,32 @@ const {
   loading, saving, smsTesting, emailTesting, testEmailTo, paymentTesting, platformMaxFileMb, isDirty, forbidConcurrentLogin,
   siteDraft, sessionDraft, securityDraft, loginDraft, registerDraft, smsDraft, emailDraft,
   fileDraft, rateDraft, thirdDraft, paymentDraft, aiDraft, savedSnapshot,
+  storageForm, storageEngine, storageActiveType, storageHealthy, storageSaving, storageTesting,
+  testStorageConnection, saveStorageConfig,
   roleOptions, userOptions, testSmsPhone, testSmsTemplate, recentSmsLogs, recentEmailLogs,
   showPaymentModal, payOrderStatus, payStatusRefreshing, paymentResult,
   captchaTypeOptions, providerOptions, smsTemplateOptions, alipaySignOptions, alipayGatewayOptions,
   smsStatusText, emailStatusText, load, saveAll, resetAll, loadRecentSmsLogs, openSmsLogs, loadRecentEmailLogs, openEmailLogs,
   sendTestSms, sendTestEmailAction, sendTestPayment, pollPayOrderStatus, closePaymentModal,
 } = useConfigEditor()
+
+const storageEngineOptions: { type: StorageEngineType; name: string; desc: string }[] = [
+  { type: 'local', name: '本地磁盘', desc: '服务端本地目录，单机部署首选' },
+  { type: 'minio', name: 'MinIO', desc: '私有化 S3 兼容对象存储' },
+  { type: 'cos', name: '腾讯云 COS', desc: '腾讯云高可用对象存储' },
+  { type: 'oss', name: '阿里云 OSS', desc: '阿里云企业级对象存储' },
+]
+
+function storageEngineLabel(type: StorageEngineType): string {
+  return storageEngineOptions.find((item) => item.type === type)?.name || type
+}
+
+const storageSelectedLabel = computed(() => storageEngineLabel(storageEngine.value))
+const storageActiveLabel = computed(() => storageEngineLabel(storageActiveType.value))
+
+function selectStorageEngine(type: StorageEngineType) {
+  storageEngine.value = type
+}
 
 useUnsavedLeaveGuard()
 
@@ -1487,5 +1663,117 @@ $config-cell-padding-x: 24rpx;
 
 .config-textarea__mask {
   -webkit-text-security: disc;
+}
+
+.config-file-wrap {
+  padding-bottom: 8rpx;
+}
+
+.storage-engine-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+  padding: 24rpx;
+}
+
+.storage-engine {
+  padding: 20rpx;
+  border: 1px solid $color-border-light;
+  border-radius: $radius-md;
+  background: $color-bg-card;
+  transition: all 0.2s ease;
+}
+
+.storage-engine--active {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.06);
+  box-shadow: 0 0 0 2rpx rgba(99, 102, 241, 0.12);
+}
+
+.storage-engine__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8rpx;
+}
+
+.storage-engine__name {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.storage-engine__badge {
+  flex-shrink: 0;
+  padding: 2rpx 10rpx;
+  border-radius: 999rpx;
+  background: #6366f1;
+  color: #fff;
+  font-size: 18rpx;
+  line-height: 1.6;
+}
+
+.storage-engine__desc {
+  display: block;
+  margin-top: 8rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.5;
+}
+
+.storage-status {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 0 24rpx 24rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.storage-status__value {
+  color: $color-text-primary;
+  font-weight: $font-weight-semibold;
+}
+
+.storage-status__health {
+  margin-left: auto;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 20rpx;
+}
+
+.storage-status__health--ok {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.1);
+}
+
+.storage-status__health--bad {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.storage-actions {
+  display: flex;
+  gap: 16rpx;
+  padding: 0 24rpx 24rpx;
+}
+
+.storage-action-btn {
+  flex: 1;
+  height: 72rpx;
+  line-height: 72rpx;
+  border-radius: $radius-md;
+  background: $color-bg-muted;
+  color: $color-text-regular;
+  font-size: $font-size-sm;
+}
+
+.storage-action-btn::after {
+  border: none;
+}
+
+.storage-action-btn--primary {
+  background: $color-primary;
+  color: #fff;
 }
 </style>

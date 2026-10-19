@@ -15,6 +15,7 @@ public class SysFileGroupDO implements Serializable {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+    private Long deptId;
     private String name;
     private Integer sort;
     private String createBy;

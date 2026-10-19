@@ -13,10 +13,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import com.admin.server.modules.infra.framework.operlog.OperLogDiffUtils;
 import com.admin.server.modules.infra.framework.operlog.OperLogContext;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 @Service
@@ -54,12 +56,15 @@ public class RoleServiceImpl implements RoleService {
 
     @Override
     public Long create(RoleCreateReqVO reqVO) {
+        validateRoleCode(reqVO.getCode(), null);
         RoleDO role = new RoleDO();
         role.setName(reqVO.getName());
         role.setCode(reqVO.getCode());
         role.setSort(reqVO.getSort());
         role.setStatus(1);
         role.setRemark(reqVO.getRemark());
+        role.setDataScope(normalizeDataScope(reqVO.getDataScope(), reqVO.getDataScopeDeptIds()));
+        role.setDataScopeDeptIds(normalizeDeptIds(role.getDataScope(), reqVO.getDataScopeDeptIds()));
         roleMapper.insert(role);
         return role.getId();
     }
@@ -79,10 +84,13 @@ public class RoleServiceImpl implements RoleService {
         }
 
         role.setName(reqVO.getName());
+        validateRoleCode(reqVO.getCode(), role.getCode());
         role.setCode(reqVO.getCode());
         role.setSort(reqVO.getSort());
         role.setStatus(reqVO.getStatus());
         role.setRemark(reqVO.getRemark());
+        role.setDataScope(normalizeDataScope(reqVO.getDataScope(), reqVO.getDataScopeDeptIds()));
+        role.setDataScopeDeptIds(normalizeDeptIds(role.getDataScope(), reqVO.getDataScopeDeptIds()));
         roleMapper.updateById(role);
     }
 
@@ -134,5 +142,50 @@ public class RoleServiceImpl implements RoleService {
         }
         role.setStatus(status);
         roleMapper.updateById(role);
+    }
+
+    /**
+     * 系统保留角色编码不允许新建或改名为这些值，避免伪造超级管理员。
+     */
+    private static final Set<String> RESERVED_ROLE_CODES = Set.of("super_admin", "admin");
+
+    private void validateRoleCode(String code, String existingCode) {
+        if (!StringUtils.hasText(code)) {
+            return;
+        }
+        String normalized = code.trim().toLowerCase(Locale.ROOT);
+        if (!RESERVED_ROLE_CODES.contains(normalized)) {
+            return;
+        }
+        if (existingCode != null && normalized.equals(existingCode.trim().toLowerCase(Locale.ROOT))) {
+            return;
+        }
+        throw new BusinessException(400, "角色编码「" + code.trim() + "」为系统保留，不允许使用");
+    }
+
+    /**
+     * 数据范围归一化：未传时默认「全部」，非法值回退「全部」，自定义范围必须选择部门。
+     */
+    private Integer normalizeDataScope(Integer dataScope, String dataScopeDeptIds) {
+        if (dataScope == null) {
+            return 1;
+        }
+        if (dataScope < 1 || dataScope > 5) {
+            throw new BusinessException(400, "数据范围取值不合法");
+        }
+        if (dataScope == 2 && !StringUtils.hasText(dataScopeDeptIds)) {
+            throw new BusinessException(400, "自定义数据范围必须选择部门");
+        }
+        return dataScope;
+    }
+
+    /**
+     * 仅自定义范围保存部门 ID，其它范围清空，避免切换范围后残留脏数据。
+     */
+    private String normalizeDeptIds(Integer dataScope, String dataScopeDeptIds) {
+        if (dataScope == null || dataScope != 2 || !StringUtils.hasText(dataScopeDeptIds)) {
+            return null;
+        }
+        return dataScopeDeptIds.trim();
     }
 }

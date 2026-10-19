@@ -252,6 +252,7 @@ import { getUser, getUserRoleIds, resetUserPassword, deleteUser, unlockUserLogin
 import { getRoleList } from '@/api/system/role'
 import { useModulePermission } from '@/composables/useModulePermission'
 import { formatDateTime } from '@/utils/format'
+import { encryptSm2 } from '@/utils/crypto'
 import { formatLoginLockRemain, buildUnlockLoginConfirm, canUnlockLoginLock, hasAccountLoginLock, hasIpLoginLock } from '@/utils/login-lock'
 import { showConfirm } from '@/utils/app-dialog'
 import type { UserVO } from '@/types/user'
@@ -336,7 +337,8 @@ async function onResetPassword() {
     return
   }
   try {
-    await resetUserPassword(userId.value, password)
+    // 与 PC 端后台重置密码保持一致：口令走 SM2 传输加密
+    await resetUserPassword(userId.value, encryptSm2(password))
     uni.showToast({ title: '密码已重置', icon: 'success' })
   } catch (e) {
     console.error(e)

@@ -1,12 +1,12 @@
 package com.admin.server.modules.infra.api.recycle;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.modules.infra.api.recycle.vo.RecycleSummaryVO;
 import com.admin.server.modules.infra.service.recycle.RecycleCenterService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -21,7 +21,7 @@ public class RecycleCenterController {
 
     @Operation(summary = "回收站汇总统计")
     @GetMapping("/summary")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     public CommonResult<RecycleSummaryVO> summary() {
         return CommonResult.success(recycleCenterService.summary());
     }

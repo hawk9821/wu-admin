@@ -35,11 +35,14 @@ public class LocalFileStorage {
             throw new IllegalArgumentException("文件大小不能超过 " + maxMb + "MB");
         }
         if (!StringUtils.hasText(originalName)) {
-            return;
+            throw new IllegalArgumentException("文件名不能为空");
         }
         String ext = getSuffix(originalName).replace(".", "").toLowerCase();
+        if (!StringUtils.hasText(ext)) {
+            throw new IllegalArgumentException("文件必须包含扩展名");
+        }
         String allowed = dynamicConfigProvider.getFileAllowedExtensions();
-        if (!StringUtils.hasText(allowed) || !StringUtils.hasText(ext)) {
+        if (!StringUtils.hasText(allowed)) {
             return;
         }
         boolean ok = false;
@@ -55,11 +58,11 @@ public class LocalFileStorage {
     }
 
     public String upload(InputStream inputStream, String storagePath, String fileName) throws IOException {
-        Path base = Paths.get(properties.getLocalPath());
+        Path base = Paths.get(properties.getLocalPath()).normalize().toAbsolutePath();
         Files.createDirectories(base);
-        Path dir = base.resolve(storagePath);
+        Path dir = resolveSafe(storagePath);
         Files.createDirectories(dir);
-        Path target = dir.resolve(fileName);
+        Path target = resolveSafe(storagePath + "/" + fileName);
         Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
         return "/api/files/" + storagePath + "/" + fileName;
     }

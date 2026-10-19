@@ -7,6 +7,7 @@ import {
 import { sliderVerifyToRequest } from '@/utils/slider-captcha'
 import type { SliderVerifyPayload } from '@/utils/slider-captcha'
 import { logger } from '@/utils/logger'
+import { encryptSm2 } from '@/utils/crypto'
 
 type SecurityMode = 'password' | 'sms' | 'email'
 
@@ -152,7 +153,12 @@ export function usePasswordForm() {
     if (!validatePwd(form.newPassword, form.confirmPassword)) return
     saving.value = true
     try {
-      await changePassword({ ...form })
+      // 与登录/注册保持一致：口令走 SM2 传输加密（后端解密后校验）
+      await changePassword({
+        oldPassword: encryptSm2(form.oldPassword),
+        newPassword: encryptSm2(form.newPassword),
+        confirmPassword: encryptSm2(form.confirmPassword),
+      })
       uni.showToast({ title: '修改成功', icon: 'success' })
       resetPasswordForm()
       setTimeout(() => uni.navigateBack(), 500)
@@ -221,7 +227,11 @@ export function usePasswordForm() {
     if (!validatePwd(smsForm.newPassword, smsForm.confirmPassword)) return
     saving.value = true
     try {
-      await resetPasswordBySms({ ...smsForm })
+      await resetPasswordBySms({
+        ...smsForm,
+        newPassword: encryptSm2(smsForm.newPassword),
+        confirmPassword: encryptSm2(smsForm.confirmPassword),
+      })
       uni.showToast({ title: '密码已重置', icon: 'success' })
       resetSmsForm()
       setTimeout(() => uni.navigateBack(), 500)
@@ -240,7 +250,11 @@ export function usePasswordForm() {
     if (!validatePwd(emailForm.newPassword, emailForm.confirmPassword)) return
     saving.value = true
     try {
-      await resetPasswordByEmail({ ...emailForm })
+      await resetPasswordByEmail({
+        ...emailForm,
+        newPassword: encryptSm2(emailForm.newPassword),
+        confirmPassword: encryptSm2(emailForm.confirmPassword),
+      })
       uni.showToast({ title: '密码已重置', icon: 'success' })
       resetEmailForm()
       setTimeout(() => uni.navigateBack(), 500)

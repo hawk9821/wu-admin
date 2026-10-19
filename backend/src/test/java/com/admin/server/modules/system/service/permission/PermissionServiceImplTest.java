@@ -7,7 +7,6 @@ import com.admin.server.modules.system.dal.mysql.permission.RoleMapper;
 import com.admin.server.modules.system.dal.mysql.permission.RoleMenuMapper;
 import com.admin.server.modules.system.dal.mysql.permission.UserRoleMapper;
 import com.admin.server.testsupport.MybatisLambdaTestBase;
-import com.admin.server.testsupport.MybatisMockMatchers;
 import com.admin.server.testsupport.ServiceTestFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -61,8 +60,8 @@ class PermissionServiceImplTest extends MybatisLambdaTestBase {
     @Test
     @DisplayName("hasPermission：直接匹配权限码")
     void hasPermission_directMatch() {
-        MenuDO menu = ServiceTestFixtures.menu(10L, 0L, 1, "system:user:list");
-        when(menuMapper.selectList(MybatisMockMatchers.anyLambdaQueryWrapper())).thenReturn(List.of(menu));
+        when(menuMapper.selectPermissionCodesByUserId(USER_ID))
+                .thenReturn(List.of("system:user:list"));
 
         assertTrue(permissionService.hasPermission(USER_ID, "system:user:list"));
     }
@@ -70,8 +69,8 @@ class PermissionServiceImplTest extends MybatisLambdaTestBase {
     @Test
     @DisplayName("hasPermission：仅有 query 权限时可访问 list 接口")
     void hasPermission_queryAliasAllowsList() {
-        MenuDO menu = ServiceTestFixtures.menu(10L, 0L, 1, "system:user:query");
-        when(menuMapper.selectList(MybatisMockMatchers.anyLambdaQueryWrapper())).thenReturn(List.of(menu));
+        when(menuMapper.selectPermissionCodesByUserId(USER_ID))
+                .thenReturn(List.of("system:user:query"));
 
         assertTrue(permissionService.hasPermission(USER_ID, "system:user:list"));
     }
@@ -81,6 +80,14 @@ class PermissionServiceImplTest extends MybatisLambdaTestBase {
     void hasPermission_blankReturnsFalse() {
         assertFalse(permissionService.hasPermission(USER_ID, ""));
         assertFalse(permissionService.hasPermission(USER_ID, null));
+    }
+
+    @Test
+    @DisplayName("hasPermission：没有任何权限码时返回 false")
+    void hasPermission_noCodesReturnsFalse() {
+        when(menuMapper.selectPermissionCodesByUserId(USER_ID)).thenReturn(List.of());
+
+        assertFalse(permissionService.hasPermission(USER_ID, "system:user:list"));
     }
 
     @Test
@@ -98,12 +105,10 @@ class PermissionServiceImplTest extends MybatisLambdaTestBase {
     void getUserMenuList_hidesChildWhenAncestorDisabled() {
         MenuDO disabledParent = ServiceTestFixtures.menu(1L, 0L, 0, null);
         MenuDO child = ServiceTestFixtures.menu(10L, 1L, 1, "system:demo:list");
-        List<MenuDO> allMenus = List.of(disabledParent, child);
 
-        when(menuMapper.selectList(isNull())).thenReturn(allMenus);
-        when(menuMapper.selectList(MybatisMockMatchers.anyLambdaQueryWrapper()))
-                .thenReturn(allMenus)
-                .thenReturn(List.of(child));
+        // JOIN 查询只返回被授权的菜单；祖先停用信息来自全量菜单树
+        when(menuMapper.selectMenusByUserId(USER_ID)).thenReturn(List.of(child));
+        when(menuMapper.selectList(isNull())).thenReturn(List.of(disabledParent, child));
 
         List<MenuDO> menus = permissionService.getUserMenuList(USER_ID);
 
@@ -113,7 +118,7 @@ class PermissionServiceImplTest extends MybatisLambdaTestBase {
     @Test
     @DisplayName("getUserMenuList：无角色时返回空列表")
     void getUserMenuList_noRolesReturnsEmpty() {
-        when(userRoleMapper.selectListByUserId(999L)).thenReturn(List.of());
+        when(menuMapper.selectMenusByUserId(999L)).thenReturn(List.of());
 
         assertTrue(permissionService.getUserMenuList(999L).isEmpty());
     }
@@ -139,14 +144,8 @@ class PermissionServiceImplTest extends MybatisLambdaTestBase {
     @Test
     @DisplayName("hasPermission：仅 AI 查询按钮时可访问 list 接口")
     void hasPermission_aiQueryAllowsList() {
-        MenuDO dir = ServiceTestFixtures.menu(210L, 0L, 1, null);
-        MenuDO page = ServiceTestFixtures.menu(200L, 210L, 2, "system:ai-model:list");
-        MenuDO queryBtn = ServiceTestFixtures.menu(207L, 200L, 3, "system:ai-model:query");
-        when(roleMenuMapper.selectListByRoleId(ROLE_ID))
-                .thenReturn(List.of(ServiceTestFixtures.roleMenu(ROLE_ID, 207L)));
-        when(menuMapper.selectList(isNull())).thenReturn(List.of(dir, page, queryBtn));
-        when(menuMapper.selectList(MybatisMockMatchers.anyLambdaQueryWrapper()))
-                .thenReturn(List.of(dir, page, queryBtn));
+        when(menuMapper.selectPermissionCodesByUserId(USER_ID))
+                .thenReturn(List.of("system:ai-model:query"));
 
         assertTrue(permissionService.hasPermission(USER_ID, "system:ai-model:list"));
         assertTrue(permissionService.hasPermission(USER_ID, "system:ai-model:query"));
@@ -156,13 +155,8 @@ class PermissionServiceImplTest extends MybatisLambdaTestBase {
     @Test
     @DisplayName("getUserPermissionCodes：query 权限自动附带 list 别名")
     void getUserPermissionCodes_queryAddsListAlias() {
-        MenuDO page = ServiceTestFixtures.menu(205L, 210L, 2, "system:ai-log:list");
-        MenuDO queryBtn = ServiceTestFixtures.menu(208L, 205L, 3, "system:ai-log:query");
-        when(roleMenuMapper.selectListByRoleId(ROLE_ID))
-                .thenReturn(List.of(ServiceTestFixtures.roleMenu(ROLE_ID, 208L)));
-        when(menuMapper.selectList(isNull())).thenReturn(List.of(page, queryBtn));
-        when(menuMapper.selectList(MybatisMockMatchers.anyLambdaQueryWrapper()))
-                .thenReturn(List.of(page, queryBtn));
+        when(menuMapper.selectPermissionCodesByUserId(USER_ID))
+                .thenReturn(List.of("system:ai-log:list", "system:ai-log:query"));
 
         Set<String> codes = permissionService.getUserPermissionCodes(USER_ID);
 
@@ -173,14 +167,9 @@ class PermissionServiceImplTest extends MybatisLambdaTestBase {
     @Test
     @DisplayName("hasPermission：仅勾选按钮时继承父级 list 权限（与侧栏一致）")
     void hasPermission_buttonInheritsParentList() {
-        MenuDO dir = ServiceTestFixtures.menu(210L, 0L, 1, null);
-        MenuDO page = ServiceTestFixtures.menu(200L, 210L, 2, "system:ai-model:list");
-        MenuDO createBtn = ServiceTestFixtures.menu(201L, 200L, 3, "system:ai-model:create");
-        when(roleMenuMapper.selectListByRoleId(ROLE_ID))
-                .thenReturn(List.of(ServiceTestFixtures.roleMenu(ROLE_ID, 201L)));
-        when(menuMapper.selectList(isNull())).thenReturn(List.of(dir, page, createBtn));
-        when(menuMapper.selectList(MybatisMockMatchers.anyLambdaQueryWrapper()))
-                .thenReturn(List.of(dir, page, createBtn));
+        // JOIN 查询在 SQL 层已经完成父级补齐，返回的就是含父级页面权限的完整集合
+        when(menuMapper.selectPermissionCodesByUserId(USER_ID))
+                .thenReturn(List.of("system:ai-model:list", "system:ai-model:create"));
 
         assertTrue(permissionService.hasPermission(USER_ID, "system:ai-model:list"));
         assertTrue(permissionService.hasPermission(USER_ID, "system:ai-model:create"));

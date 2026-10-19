@@ -1,12 +1,12 @@
 package com.admin.server.modules.infra.api.monitor;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.modules.infra.api.monitor.vo.ServerInfoVO;
 import com.admin.server.modules.infra.service.monitor.ServerMonitorService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -21,7 +21,7 @@ public class ServerMonitorController {
 
     @Operation(summary = "本机 CPU / 内存 / JVM / 磁盘信息")
     @GetMapping("/info")
-    @PreAuthorize("@ss.hasPermission('monitor:server:query')")
+    @RequirePermission("monitor:server:query")
     public CommonResult<ServerInfoVO> info() {
         return CommonResult.success(serverMonitorService.getInfo());
     }

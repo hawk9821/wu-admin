@@ -19,6 +19,28 @@ function showForbiddenOnce(message: string) {
   ElMessage.error(message)
 }
 
+/** 同一类提示在短时间窗口内只展示一次，避免并发请求把页面刷出多条重复 Toast */
+const TOAST_DEDUPE_WINDOW_MS = 3000
+const recentToastAt = new Map<string, number>()
+
+function showMessageOnce(message: string, type: 'error' | 'warning' = 'error') {
+  const key = `${type}:${message}`
+  const now = Date.now()
+  const last = recentToastAt.get(key)
+  if (last != null && now - last < TOAST_DEDUPE_WINDOW_MS) return
+  if (recentToastAt.size > 50) {
+    for (const [item, at] of recentToastAt) {
+      if (now - at >= TOAST_DEDUPE_WINDOW_MS) recentToastAt.delete(item)
+    }
+  }
+  recentToastAt.set(key, now)
+  if (type === 'warning') {
+    ElMessage.warning(message)
+  } else {
+    ElMessage.error(message)
+  }
+}
+
 function rejectWithToast(message: string, source?: unknown): Promise<never> {
   const err = source instanceof Error ? source : new Error(message)
   if (!err.message) {
@@ -32,28 +54,54 @@ function resolveBodyMessage(message?: string, fallback = '请求失败') {
   return message || fallback
 }
 
+/** 并发请求同时收到 401 时，只清理一次会话、只跳转一次登录页 */
+let lastSessionClearAt = 0
 function clearSessionAndRedirectLogin() {
+  const now = Date.now()
+  if (now - lastSessionClearAt < 2000) return
+  lastSessionClearAt = now
   try {
     useUserStore().logout()
   } catch {
     /* store 可能尚未初始化 */
   }
-  router.push('/login')
+  if (router.currentRoute?.value?.path !== '/login') {
+    void router.push('/login')
+  }
 }
 
-/** 公开认证接口（登录 Cookie 写入前不依赖会话） */
+/** 公开认证接口（登录 Cookie 写入前不依赖会话，也无需会话签名密钥） */
 const AUTH_PUBLIC_SUFFIXES = [
   '/auth/login',
   '/auth/register',
   '/auth/captcha',
   '/auth/config',
   '/auth/sms-code',
+  '/auth/sms-code/verify',
+  '/auth/email-code',
+  '/auth/forgot-password/check',
+  '/auth/forgot-password/sms-code',
+  '/auth/forgot-password/reset',
+  '/auth/slider-challenge',
+  '/auth/slider-verify',
+  '/auth/session-sign-init',
+  '/auth/info',
+  '/auth/logout',
 ]
 
 function isAuthPublicUrl(url?: string): boolean {
   if (!url) return false
   const path = url.split('?')[0]
   return AUTH_PUBLIC_SUFFIXES.some((suffix) => path === suffix || path.endsWith(suffix))
+}
+
+/** 是否已有登录态（用于避免未登录时反复请求会话密钥） */
+function isLoggedIn(): boolean {
+  try {
+    return !!useUserStore().isLoggedIn
+  } catch {
+    return false
+  }
 }
 
 const service: AxiosInstance = axios.create({
@@ -109,7 +157,7 @@ service.interceptors.request.use(
       !config.url?.includes('/auth/logout')
     ) {
       const currentSec = getSecurityConfig()
-      if (!currentSec.sm3SignKey && !currentSec.sm4Key) {
+      if (!currentSec.sm3SignKey && !currentSec.sm4Key && isLoggedIn()) {
         try {
           await requestSessionSignKey(service)
         } catch {
@@ -129,6 +177,7 @@ service.interceptors.request.use(
 
     if (secConfig.sm4EncryptEnabled && secConfig.sm4Key) {
       config.headers['X-Accept-Encrypted'] = '1'
+      config.headers['X-Encrypted-Payload'] = 'SM4-GCM'
       if (config.data && !isFormData) {
         const plainStr = typeof config.data === 'string' ? config.data : JSON.stringify(config.data)
         config.data = encryptSm4(plainStr, secConfig.sm4Key)
@@ -189,18 +238,30 @@ service.interceptors.request.use(
 service.interceptors.response.use(
   (response: AxiosResponse) => {
     const secConfig = getSecurityConfig()
-    // 若响应标明 SM4 加密，且密钥已下发，自动解密 (兼容 CORS 限制：如果启用加密且返回的是非 JSON 字符串，也尝试解密)
-    const isEncrypted = response?.headers?.['x-encrypted'] === '1' || 
-      (secConfig.sm4EncryptEnabled && typeof response.data === 'string' && !response.data.trim().startsWith('{') && !response.data.trim().startsWith('['));
+    // 仅信任后端明确声明的加密响应头，不再根据响应体形态猜测，避免把明文误判为密文
+    const payloadType = response?.headers?.['x-encrypted-payload']
+    const isEncrypted = response?.headers?.['x-encrypted'] === '1'
+      || (typeof payloadType === 'string' && payloadType.toUpperCase() === 'SM4-GCM')
     if (isEncrypted && typeof response.data === 'string') {
       const { sm4Key } = secConfig
-      if (sm4Key) {
-        const plainJson = decryptSm4(response.data, sm4Key)
-        try {
-          response.data = JSON.parse(plainJson)
-        } catch {
-          response.data = plainJson
-        }
+      if (!sm4Key) {
+        // 不在这里逐条弹窗：并发请求会同时命中该分支，统一去重并只处理一次会话
+        showMessageOnce('会话安全凭据缺失，无法解密响应数据，请重新登录')
+        clearSessionAndRedirectLogin()
+        return rejectWithToast('响应数据解密失败：密钥未下发')
+      }
+      let plainJson: string
+      try {
+        plainJson = decryptSm4(response.data, sm4Key)
+      } catch (err) {
+        console.error('响应数据国密 SM4-GCM 认证解密失败:', err)
+        showMessageOnce('响应数据认证解密失败，请刷新页面后重试')
+        return rejectWithToast('响应数据认证解密失败')
+      }
+      try {
+        response.data = JSON.parse(plainJson)
+      } catch {
+        response.data = plainJson
       }
     }
 
@@ -216,10 +277,11 @@ service.interceptors.response.use(
 
     if (code === 401) {
       if (isAuthPublicUrl(cfg.url)) {
-        ElMessage.error(text || '认证失败')
+        showMessageOnce(text || '认证失败')
         return rejectWithToast(text || '认证失败')
       }
-      ElMessage.error('登录已过期，请重新登录')
+      // 并发请求只提示一次，避免整屏都是“登录已过期”
+      showMessageOnce('登录已过期，请重新登录')
       clearSessionAndRedirectLogin()
       return rejectWithToast(text || '未授权')
     }
@@ -236,7 +298,7 @@ service.interceptors.response.use(
     }
 
     if (code === 429) {
-      ElMessage.warning(text || '操作过于频繁，请稍后再试')
+      showMessageOnce(text || '操作过于频繁，请稍后再试', 'warning')
       return rejectWithToast(text || '操作过于频繁，请稍后再试')
     }
 
@@ -244,31 +306,52 @@ service.interceptors.response.use(
       return Promise.reject(new Error(text || '获取签名密钥失败'))
     }
 
-    ElMessage.error(text)
+    showMessageOnce(text)
     return rejectWithToast(text)
   },
   (error) => {
     console.error('响应错误:', error)
 
+    const cfg = error.config as InternalAxiosRequestConfig & { silent403?: boolean; _isRetrySign?: boolean }
+
+    // 401 必须优先于解密处理：会话失效时响应通常仍带加密头，
+    // 若先走解密分支，并发请求会同时弹“凭据缺失”，把页面刷满重复提示。
+    if (error.response?.status === 401 && !isAuthPublicUrl(cfg?.url)) {
+      showMessageOnce('登录已过期，请重新登录')
+      clearSessionAndRedirectLogin()
+      markErrorToastShown(error)
+      return Promise.reject(error)
+    }
+
     if (error.response) {
       const secConfig = getSecurityConfig()
-      // 若错误响应标明 SM4 加密，且密钥已下发，自动解密 (CORS 容错)
-      const isEncrypted = error.response.headers?.['x-encrypted'] === '1' || 
-        (secConfig.sm4EncryptEnabled && typeof error.response.data === 'string' && !error.response.data.trim().startsWith('{') && !error.response.data.trim().startsWith('['));
+      // 仅信任后端明确声明的加密响应头，解密失败必须显式报错（Fail-Closed）
+      const payloadType = error.response.headers?.['x-encrypted-payload']
+      const isEncrypted = error.response.headers?.['x-encrypted'] === '1'
+        || (typeof payloadType === 'string' && payloadType.toUpperCase() === 'SM4-GCM')
       if (isEncrypted && typeof error.response.data === 'string') {
         const { sm4Key } = secConfig
-        if (sm4Key) {
-          const plainJson = decryptSm4(error.response.data, sm4Key)
-          try {
-            error.response.data = JSON.parse(plainJson)
-          } catch {
-            error.response.data = plainJson
-          }
+        if (!sm4Key) {
+          showMessageOnce('会话安全凭据缺失，无法解密响应数据，请重新登录')
+          clearSessionAndRedirectLogin()
+          return rejectWithToast('响应数据解密失败：密钥未下发')
+        }
+        let plainJson: string
+        try {
+          plainJson = decryptSm4(error.response.data, sm4Key)
+        } catch (err) {
+          console.error('错误响应国密 SM4-GCM 认证解密失败:', err)
+          showMessageOnce('响应数据认证解密失败，请刷新页面后重试')
+          return rejectWithToast('响应数据认证解密失败')
+        }
+        try {
+          error.response.data = JSON.parse(plainJson)
+        } catch {
+          error.response.data = plainJson
         }
       }
 
       const { status } = error.response
-      const cfg = error.config as InternalAxiosRequestConfig & { silent403?: boolean; _isRetrySign?: boolean }
       const text = getErrorMessage(error) || error.message || '请求失败'
 
       // 🔐 静默排除：如果是初始化会话签名密钥失败，一律静默 Reject 不弹窗
@@ -278,7 +361,7 @@ service.interceptors.response.use(
 
       if (status === 401) {
         if (isAuthPublicUrl(cfg?.url)) {
-          ElMessage.error(text || '认证失败')
+          showMessageOnce(text || '认证失败')
         } else {
           // 未认证或 Token 过期时，静默清理 Token 并平滑跳转至登录页，不在页面上弹出多余的红色吐司
           clearSessionAndRedirectLogin()
@@ -292,13 +375,13 @@ service.interceptors.response.use(
           showForbiddenOnce(text || '权限不足，无法访问')
         }
       } else if (status === 429) {
-        ElMessage.warning(text || '操作过于频繁，请稍后再试')
+        showMessageOnce(text || '操作过于频繁，请稍后再试', 'warning')
       } else {
-        ElMessage.error(text)
+        showMessageOnce(text)
       }
       markErrorToastShown(error)
     } else {
-      ElMessage.error('网络异常，请检查网络连接')
+      showMessageOnce('网络异常，请检查网络连接')
       markErrorToastShown(error)
     }
 

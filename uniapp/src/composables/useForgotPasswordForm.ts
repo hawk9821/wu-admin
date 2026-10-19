@@ -4,6 +4,7 @@ import { sliderVerifyToRequest } from '@/utils/slider-captcha'
 import type { SliderVerifyPayload } from '@/utils/slider-captcha'
 import { navigateToLogin } from '@/utils/auth-route'
 import { logger } from '@/utils/logger'
+import { encryptSm2 } from '@/utils/crypto'
 
 type ForgotStep = 1 | 2 | 3
 
@@ -117,8 +118,9 @@ export function useForgotPasswordForm() {
       await resetForgotPassword({
         username: form.username.trim(),
         smsCode: form.smsCode.trim(),
-        newPassword: form.newPassword,
-        confirmPassword: form.confirmPassword,
+        // 找回密码属于未登录敏感入口，口令同样走 SM2 传输加密
+        newPassword: encryptSm2(form.newPassword),
+        confirmPassword: encryptSm2(form.confirmPassword),
       })
       uni.showToast({ title: '密码已重置', icon: 'success' })
       setTimeout(() => navigateToLogin(), 600)

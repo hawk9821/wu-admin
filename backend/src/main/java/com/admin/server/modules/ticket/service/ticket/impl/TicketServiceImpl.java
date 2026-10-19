@@ -16,6 +16,7 @@ import com.admin.server.modules.ticket.dal.mysql.ticket.TicketCommentMapper;
 import com.admin.server.modules.ticket.dal.mysql.ticket.TicketMapper;
 import com.admin.server.modules.system.dal.mysql.user.UserMapper;
 import com.admin.server.modules.system.service.notice.NoticeService;
+import com.admin.server.modules.system.service.permission.DataScopeService;
 import com.admin.server.modules.system.service.permission.PermissionService;
 import com.admin.server.modules.ticket.service.ticket.TicketService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -50,6 +51,8 @@ public class TicketServiceImpl implements TicketService {
     private TicketAttachmentMapper ticketAttachmentMapper;
     @Resource
     private PermissionService permissionService;
+    @Resource
+    private DataScopeService dataScopeService;
     @Resource
     private NoticeService noticeService;
 
@@ -89,9 +92,16 @@ public class TicketServiceImpl implements TicketService {
             wrapper.eq(TicketDO::getAssigneeUserId, assigneeUserId);
         }
         if (!isSuperAdmin) {
-            wrapper.and(w -> w.eq(TicketDO::getCreatorUserId, currentUserId)
-                    .or().eq(TicketDO::getAssigneeUserId, currentUserId)
-                    .or().eq(TicketDO::getAssigneeUserId, 0L));
+            // 组织隔离：本人创建/被指派的工单，或本组织（数据范围内）成员创建的工单
+            String visibleUsersSql = dataScopeService.visibleUserIdsSql();
+            if (visibleUsersSql == null) {
+                // 数据范围为全部时不再追加限制
+            } else {
+                wrapper.and(w -> w.eq(TicketDO::getCreatorUserId, currentUserId)
+                        .or().eq(TicketDO::getAssigneeUserId, currentUserId)
+                        .or().eq(TicketDO::getAssigneeUserId, 0L)
+                        .or().inSql(TicketDO::getCreatorUserId, visibleUsersSql));
+            }
         }
         wrapper.orderByDesc(TicketDO::getCreateTime);
         Page<TicketDO> page = ticketMapper.selectPage(new Page<>(pageParam.getPageNo(), pageParam.getPageSize()), wrapper);

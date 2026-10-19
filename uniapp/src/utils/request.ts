@@ -51,9 +51,16 @@ const AUTH_PUBLIC_SUFFIXES = [
   '/auth/captcha',
   '/auth/config',
   '/auth/sms-code',
+  '/auth/sms-code/verify',
+  '/auth/email-code',
   '/auth/forgot-password/check',
   '/auth/forgot-password/sms-code',
   '/auth/forgot-password/reset',
+  '/auth/slider-challenge',
+  '/auth/slider-verify',
+  '/auth/session-sign-init',
+  '/auth/info',
+  '/auth/logout',
 ]
 
 function isAuthPublicUrl(url?: string): boolean {
@@ -71,7 +78,33 @@ function showForbiddenOnce(message: string) {
   uni.showToast({ title: message, icon: 'none' })
 }
 
+/** 同一类提示在短时间窗口内只展示一次，避免并发请求把页面刷出多条重复 Toast */
+const TOAST_DEDUPE_WINDOW_MS = 3000
+const recentToastAt = new Map<string, number>()
+
+function showToastOnce(message: string) {
+  const now = Date.now()
+  const last = recentToastAt.get(message)
+  if (last != null && now - last < TOAST_DEDUPE_WINDOW_MS) return
+  if (recentToastAt.size > 50) {
+    for (const [item, at] of recentToastAt) {
+      if (now - at >= TOAST_DEDUPE_WINDOW_MS) recentToastAt.delete(item)
+    }
+  }
+  recentToastAt.set(message, now)
+  uni.showToast({ title: message, icon: 'none' })
+}
+
+/** 并发请求同时收到 401 时，只清理一次会话、只跳转一次登录页 */
+let lastSessionClearAt = 0
 function clearSessionAndRedirectLogin() {
+  const now = Date.now()
+  if (now - lastSessionClearAt < 2000) return
+  lastSessionClearAt = now
+  // 会话失效时必须清空内存中的 SM4/SM3 会话密钥：
+  // 否则残留的旧密钥会继续用于加密登录请求，而登录接口会在服务端轮换密钥，
+  // 导致登录响应无法用旧密钥解密（GCM Tag 校验失败）。
+  clearSignKeys()
   removeToken()
   uni.reLaunch({ url: '/pages/login/index' })
 }
@@ -135,12 +168,13 @@ http.interceptors.request.use(
     const secConfig = getSecurityConfig()
     const isFormData = typeof FormData !== 'undefined' && config.data instanceof FormData
 
-    if (secConfig.sm4Key) {
+    if (secConfig.sm4Key && !customCfg.skipEncrypt) {
       config.header['X-Accept-Encrypted'] = '1'
       if (config.data && !isFormData) {
         const plainStr = typeof config.data === 'string' ? config.data : JSON.stringify(config.data)
         config.data = encryptSm4(plainStr, secConfig.sm4Key) as any
         config.header['X-Encrypted'] = '1'
+        config.header['X-Encrypted-Payload'] = 'SM4-GCM'
       }
     }
 
@@ -192,18 +226,29 @@ http.interceptors.request.use(
 http.interceptors.response.use(
   ((response: { data: any; config?: { url?: string; silent403?: boolean }; header?: any }) => {
     const secConfig = getSecurityConfig()
-    // 若响应标明 SM4 加密，且密钥已下发，自动解密 (兼容 CORS 限制：如果启用加密且返回的是非 JSON 字符串，也尝试解密)
-    const isEncrypted = response?.header?.['x-encrypted'] === '1' || response?.header?.['X-Encrypted'] === '1' || 
-      (!!secConfig.sm4Key && typeof response.data === 'string' && !response.data.trim().startsWith('{') && !response.data.trim().startsWith('['));
+    // 仅信任后端明确声明的加密响应头，不再根据响应体形态猜测
+    const payloadType = response?.header?.['x-encrypted-payload'] ?? response?.header?.['X-Encrypted-Payload']
+    const isEncrypted = response?.header?.['x-encrypted'] === '1'
+      || response?.header?.['X-Encrypted'] === '1'
+      || (typeof payloadType === 'string' && payloadType.toUpperCase() === 'SM4-GCM')
     if (isEncrypted && typeof response.data === 'string') {
       const { sm4Key } = secConfig
-      if (sm4Key) {
-        const plainJson = decryptSm4(response.data, sm4Key)
-        try {
-          response.data = JSON.parse(plainJson)
-        } catch {
-          response.data = plainJson
-        }
+      if (!sm4Key) {
+        showToastOnce('会话安全凭据缺失，请重新登录')
+        return Promise.reject(new Error('响应数据解密失败：密钥未下发'))
+      }
+      let plainJson: string
+      try {
+        plainJson = decryptSm4(response.data, sm4Key)
+      } catch (err) {
+        console.error('响应数据国密 SM4-GCM 认证解密失败:', err)
+        showToastOnce('响应数据认证解密失败')
+        return Promise.reject(new Error('响应数据认证解密失败'))
+      }
+      try {
+        response.data = JSON.parse(plainJson)
+      } catch {
+        response.data = plainJson
       }
     }
 
@@ -218,10 +263,11 @@ http.interceptors.response.use(
     if (code === 401) {
       const url = (response.config?.url || '') as string
       if (isAuthPublicUrl(url)) {
-        uni.showToast({ title: message || '认证失败', icon: 'none' })
+        showToastOnce(message || '认证失败')
         return Promise.reject(new Error(message || '未授权'))
       }
-      uni.showToast({ title: '登录已过期', icon: 'none' })
+      // 并发请求只提示一次，避免整屏都是“登录已过期”
+      showToastOnce('登录已过期')
       clearSessionAndRedirectLogin()
       return Promise.reject(new Error(message || '未授权'))
     }
@@ -238,7 +284,7 @@ http.interceptors.response.use(
     }
 
     if (code === 429) {
-      uni.showToast({ title: message || '操作过于频繁', icon: 'none' })
+      showToastOnce(message || '操作过于频繁')
       return Promise.reject(new Error(message || '操作过于频繁'))
     }
 
@@ -247,7 +293,7 @@ http.interceptors.response.use(
     const reqUrl = (response.config?.url || '') as string
     if (reqUrl.includes('/auth/session-sign-init')) {
       if (getToken() && (message?.includes('具备登录态') || message?.includes('登录已过期') || code === 401)) {
-        uni.showToast({ title: '登录已过期', icon: 'none' })
+        showToastOnce('登录已过期')
         clearSessionAndRedirectLogin()
       }
       return Promise.reject(new Error(message || '获取签名密钥失败'))
@@ -261,18 +307,41 @@ http.interceptors.response.use(
   }) as unknown as Parameters<typeof http.interceptors.response.use>[0],
   (error: { data?: any; statusCode?: number; errMsg?: string; header?: any; config?: any }) => {
     const secConfig = getSecurityConfig()
-    // 若错误响应标明 SM4 加密，且密钥已下发，自动解密 (CORS 容错)
-    const isEncrypted = error && (error.header?.['x-encrypted'] === '1' || error.header?.['X-Encrypted'] === '1' || 
-      (!!secConfig.sm4Key && typeof error.data === 'string' && !error.data.trim().startsWith('{') && !error.data.trim().startsWith('[')));
+
+    // 401 必须优先于解密处理：会话失效时响应通常仍带加密头，
+    // 若先走解密分支，并发请求会同时弹“凭据缺失”，把页面刷满重复提示。
+    const earlyUrl = (error as any)?.config?.url || ''
+    if (error?.statusCode === 401 && !isAuthPublicUrl(earlyUrl)) {
+      showToastOnce('登录已过期')
+      clearSessionAndRedirectLogin()
+      const sessionErr = new Error('登录已过期')
+      markErrorToastShown(sessionErr)
+      return Promise.reject(sessionErr)
+    }
+
+    // 仅信任后端明确声明的加密响应头，解密失败必须显式报错（Fail-Closed）
+    const payloadType = error?.header?.['x-encrypted-payload'] ?? error?.header?.['X-Encrypted-Payload']
+    const isEncrypted = error && (error.header?.['x-encrypted'] === '1'
+      || error.header?.['X-Encrypted'] === '1'
+      || (typeof payloadType === 'string' && payloadType.toUpperCase() === 'SM4-GCM'))
     if (isEncrypted && typeof error.data === 'string') {
       const { sm4Key } = secConfig
-      if (sm4Key) {
-        const plainJson = decryptSm4(error.data, sm4Key)
-        try {
-          error.data = JSON.parse(plainJson)
-        } catch {
-          error.data = plainJson
-        }
+      if (!sm4Key) {
+        showToastOnce('会话安全凭据缺失，请重新登录')
+        return Promise.reject(new Error('响应数据解密失败：密钥未下发'))
+      }
+      let plainJson: string
+      try {
+        plainJson = decryptSm4(error.data, sm4Key)
+      } catch (err) {
+        console.error('错误响应国密 SM4-GCM 认证解密失败:', err)
+        showToastOnce('响应数据认证解密失败')
+        return Promise.reject(new Error('响应数据认证解密失败'))
+      }
+      try {
+        error.data = JSON.parse(plainJson)
+      } catch {
+        error.data = plainJson
       }
     }
 
@@ -293,7 +362,8 @@ http.interceptors.response.use(
     const msg = extractApiErrorMessage(error, '网络异常')
     const cfg = (error as any)?.config
 
-    if ((error.statusCode === 403 || isSignKeyExpiredMessage(msg)) && !cfg?._isRetrySign && !url.includes('/auth/session-sign-init')) {
+    // 只有签名密钥失效才重新协商；普通权限不足(403)不能重置会话密钥
+    if (isSignKeyExpiredMessage(msg) && !cfg?._isRetrySign && !url.includes('/auth/session-sign-init')) {
       return retryUniappRequestWithNewSignKey(cfg)
     }
     showGlobalErrorToast(msg)
@@ -305,17 +375,22 @@ http.interceptors.response.use(
 
 export default http
 
-export const get = <T = unknown>(url: string, params?: object) =>
-  http.get(url, { params }) as Promise<ApiResult<T>>
+export const get = <T = unknown>(
+  url: string,
+  params?: object,
+  config?: { silent403?: boolean },
+) =>
+  http.get(url, { params, ...config } as any) as Promise<ApiResult<T>>
 
 export const post = <T = unknown>(
   url: string,
   data?: unknown,
-  config?: { params?: Record<string, unknown> },
+  config?: { params?: Record<string, unknown>; skipEncrypt?: boolean },
 ) =>
   http.post(url, (data === null ? undefined : data) as Record<string, unknown> | undefined, {
     params: config?.params,
-  }) as Promise<ApiResult<T>>
+    skipEncrypt: config?.skipEncrypt,
+  } as any) as Promise<ApiResult<T>>
 
 export const put = <T = unknown>(
   url: string,
@@ -326,7 +401,12 @@ export const put = <T = unknown>(
     params: config?.params,
   }) as Promise<ApiResult<T>>
 
-export const del = <T = unknown>(url: string, config?: { params?: Record<string, unknown> }) =>
-  http.delete(url, undefined, { params: config?.params }) as Promise<ApiResult<T>>
+export const del = <T = unknown>(
+  url: string,
+  config?: { params?: Record<string, unknown>; data?: unknown },
+) =>
+  http.delete(url, (config?.data ?? undefined) as Record<string, unknown> | undefined, {
+    params: config?.params,
+  }) as Promise<ApiResult<T>>
 
 export type { ApiResult } from '@/types/api'

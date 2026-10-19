@@ -7,7 +7,11 @@ export function usePermission() {
     return userStore.hasPermission(permission)
   }
 
-  /** 与 PC 侧栏一致：仅匹配启用菜单树，避免 query 别名导致停用菜单仍出现在工作台 */
+  /**
+   * 工作台入口：优先匹配启用菜单树，停用菜单不会出现在侧栏/工作台。
+   * 后端下发的权限码同样只包含启用菜单，菜单树未命中时回退权限码，
+   * 避免按钮级权限被误判为无权限（与 PC 端保持一致）。
+   */
   function hasMenuPerm(permission: string) {
     return userStore.hasMenuPermission(permission)
   }

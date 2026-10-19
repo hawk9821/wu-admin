@@ -14,7 +14,8 @@ public class UserCreateReqVO {
     @Pattern(regexp = "^[a-zA-Z0-9_]+$", message = "用户名只能包含字母、数字、下划线")
     private String username;
     @NotBlank(message = "密码不能为空")
-    @Size(min = 6, max = 50, message = "密码长度 6~50 个字符")
+    // 支持明文或前端 SM2 密文传输，上限按密文预留；明文长度 6~50 的约束在解密后校验
+    @Size(max = 512, message = "密码长度不能超过 512 个字符")
     private String password;
     @NotBlank(message = "昵称不能为空")
     @Size(max = 30, message = "昵称最多 30 个字符")

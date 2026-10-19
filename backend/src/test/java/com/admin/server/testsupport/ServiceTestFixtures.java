@@ -23,7 +23,7 @@ public final class ServiceTestFixtures {
         user.setUsername(username);
         user.setNickname(username);
         user.setStatus(status);
-        user.setPassword("$2a$10$encoded");
+        user.setPassword("$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2");
         return user;
     }
 

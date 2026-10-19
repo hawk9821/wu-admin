@@ -1,4 +1,5 @@
-import { sm3, sm4 } from 'sm-crypto'
+import { sm2, sm3 } from 'sm-crypto'
+import { sm4GcmEncrypt, sm4GcmDecrypt } from './sm4'
 
 /**
  * 生成 32 位随机 Nonce 字符串 (使用密码学强随机数生成器)
@@ -18,25 +19,6 @@ export function generateNonce(): string {
     nonce += chars.charAt(bytes[i] % chars.length)
   }
   return nonce
-}
-
-/**
- * 生成 16 字节 (32 位 Hex) 随机 IV 向量
- */
-function generateRandomIvHex(): string {
-  const bytes = new Uint8Array(16)
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
-    window.crypto.getRandomValues(bytes)
-  } else {
-    for (let i = 0; i < 16; i++) {
-      bytes[i] = Math.floor(Math.random() * 256)
-    }
-  }
-  let hex = ''
-  for (let i = 0; i < 16; i++) {
-    hex += bytes[i].toString(16).padStart(2, '0')
-  }
-  return hex
 }
 
 /**
@@ -61,66 +43,35 @@ function ensureSm4HexKey(rawKey: string): string {
 }
 
 /**
- * SM4 加密（CBC 模式 + 16 字节随机 IV + PKCS7Padding）
- * 输出格式：IV (32位Hex) + SM4_CBC_Cipher (Hex)
+ * 满血标准国密 SM4-GCM 认证加密
+ * 输出格式：Base64(IV[12] + Ciphertext + Tag[16])
  * @param plainText 明文字符串
- * @param secretKey 16 字节密钥字符串
+ * @param secretKey 16 字节密钥（支持 32 位 Hex 或 16 字符文本）
  */
 export function encryptSm4(plainText: string, secretKey: string): string {
   if (!plainText) return ''
   if (!secretKey) {
     throw new Error('SM4 加密失败：密钥未下发')
   }
-  const hexKey = ensureSm4HexKey(secretKey)
-  const hexIv = generateRandomIvHex()
-  const cipherHex = sm4.encrypt(plainText, hexKey, {
-    mode: 'cbc',
-    iv: hexIv,
-    padding: 'pkcs#7',
-  } as any)
-  // 前 32 位放置随机 IV，后面接密文
-  return hexIv + cipherHex
+  return sm4GcmEncrypt(secretKey, plainText)
 }
 
 /**
- * SM4 解密（支持 CBC 模式提取 16 字节 IV 向量及旧版 ECB 兜底）
- * @param cipherText 密文字符串 (Hex 格式)
+ * 满血标准国密 SM4-GCM 认证解密（Fail-Closed）。
+ *
+ * <p>只接受 Base64(IV[12] + Ciphertext + Tag[16]) 格式；Tag 校验失败、密钥缺失或
+ * 密文被篡改时一律抛异常，不再降级到 CBC/ECB，避免削弱 AEAD 的完整性保护。</p>
+ *
+ * @param cipherText 密文字符串
  * @param secretKey 16 字节密钥字符串
+ * @throws Error 密钥缺失或认证解密失败
  */
 export function decryptSm4(cipherText: string, secretKey: string): string {
   if (!cipherText) return ''
   if (!secretKey) {
-    console.warn('SM4 密钥缺失，跳过解密')
-    return cipherText
+    throw new Error('SM4 密钥未下发，无法解密响应数据')
   }
-  try {
-    const hexKey = ensureSm4HexKey(secretKey)
-    const text = cipherText.trim()
-    // 优先尝试 CBC 模式提取前 32 位 Hex 作为 IV
-    if (text.length > 32 && /^[0-9a-fA-F]+$/.test(text)) {
-      const hexIv = text.substring(0, 32)
-      const rawCipher = text.substring(32)
-      try {
-        const decrypted = sm4.decrypt(rawCipher, hexKey, {
-          mode: 'cbc',
-          iv: hexIv,
-          padding: 'pkcs#7',
-        } as any)
-        if (decrypted) return decrypted
-      } catch {
-        /* CBC 模式失败则尝试 ECB 降级 */
-      }
-    }
-    // ECB 兜底解密逻辑
-    const bytes = base64ToBytes(text)
-    return sm4.decrypt(bytes, hexKey, {
-      mode: 'ecb',
-      padding: 'pkcs#7',
-    } as any)
-  } catch (err) {
-    console.error('SM4 解密失败:', err)
-    return cipherText
-  }
+  return sm4GcmDecrypt(secretKey, cipherText.trim())
 }
 
 /**
@@ -140,39 +91,30 @@ export function signHmacSm3(content: string, signKey: string): string {
 }
 
 /**
- * 将 Base64 字符串转换为字节数组，兼容浏览器与小程序环境
+ * 国密 SM2 满血标准公钥加密（采用现行国家标准 C1C3C2 模式）
+ * 用于登录、注册、修改密码等敏感口令传输防护，与后端 Java BouncyCastle 互通。
+ *
+ * @param plainText 待加密明文字符串
+ * @param publicKeyHex SM2 椭圆公钥（130位带04或128位不带04）
+ * @returns 以 "sm2:" 为前缀的标准十六进制密文；若未配置公钥则安全返回原明文
  */
-function base64ToBytes(base64: string): number[] {
-  if (typeof atob === 'function') {
-    const binary = atob(base64)
-    const bytes = new Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-    return bytes
+export function encryptSm2(plainText: string, publicKeyHex?: string): string {
+  if (!plainText) return ''
+  if (plainText.startsWith('sm2:')) {
+    return plainText
   }
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-  const lookup = new Uint8Array(256)
-  for (let i = 0; i < chars.length; i++) {
-    lookup[chars.charCodeAt(i)] = i
+  const pub = (publicKeyHex || '').trim()
+  if (!pub) {
+    return plainText
   }
-  let bufferLength = base64.length * 0.75
-  if (base64[base64.length - 1] === '=') {
-    bufferLength--
-    if (base64[base64.length - 2] === '=') {
-      bufferLength--
-    }
+  try {
+    // sm-crypto 要求的公钥格式：130 位十六进制（必须包含 04 未压缩前缀），若缺失则自动补齐
+    const cleanPub = pub.startsWith('04') ? pub : ('04' + pub)
+    // cipherMode = 1 表示现行国家商用密码标准的 C1C3C2 模式
+    const cipherHex = sm2.doEncrypt(plainText, cleanPub, 1)
+    return 'sm2:' + cipherHex
+  } catch (err) {
+    console.error('SM2 公钥加密异常:', err)
+    return plainText
   }
-  const bytes = new Array(bufferLength)
-  let p = 0
-  for (let i = 0; i < base64.length; i += 4) {
-    const b1 = lookup[base64.charCodeAt(i)]
-    const b2 = lookup[base64.charCodeAt(i + 1)]
-    const b3 = lookup[base64.charCodeAt(i + 2)]
-    const b4 = lookup[base64.charCodeAt(i + 3)]
-    bytes[p++] = (b1 << 2) | (b2 >> 4)
-    if (p < bufferLength) bytes[p++] = ((b2 & 15) << 4) | (b3 >> 2)
-    if (p < bufferLength) bytes[p++] = ((b3 & 3) << 6) | b4
-  }
-  return bytes
 }

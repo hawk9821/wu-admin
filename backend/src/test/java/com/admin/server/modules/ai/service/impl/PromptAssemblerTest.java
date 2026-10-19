@@ -78,7 +78,7 @@ class PromptAssemblerTest {
         when(menuKnowledgeProvider.buildMenuKnowledge(USER_ID)).thenReturn("- 系统管理(用户/角色)");
         when(menuKnowledgeProvider.buildTopLevelOnly(USER_ID)).thenReturn("- 系统管理");
 
-        when(knowledgeRetriever.retrieveReferenceBlock("重置密码")).thenReturn("<reference_data>重置密码步骤</reference_data>");
+        when(knowledgeRetriever.retrieveReferenceBlock("重置密码")).thenReturn("<knowledge_base>重置密码步骤</knowledge_base>");
 
         String result = promptAssembler.assemble(USER_ID, "请保持礼貌", "pc", "重置密码");
 
@@ -90,7 +90,7 @@ class PromptAssemblerTest {
         assertTrue(result.contains("张三"));
         assertTrue(result.contains("技术部"));
         assertTrue(result.contains("管理员"));
-        assertTrue(result.contains("<reference_data>"));
+        assertTrue(result.contains("<knowledge_base>"));
         assertTrue(result.contains("请保持礼貌"));
         assertTrue(result.contains("安全声明"));
     }

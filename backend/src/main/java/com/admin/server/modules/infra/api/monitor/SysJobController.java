@@ -1,5 +1,6 @@
 package com.admin.server.modules.infra.api.monitor;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageParam;
 import com.admin.server.common.core.PageResult;
@@ -14,7 +15,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import lombok.Data;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -32,28 +32,28 @@ public class SysJobController {
     private SysJobLogService jobLogService;
 
     @GetMapping("/overview")
-    @PreAuthorize("@ss.hasPermission('monitor:job:list')")
+    @RequirePermission("monitor:job:list")
     @Operation(summary = "任务与调度总览")
     public CommonResult<Map<String, Object>> overview() {
         return CommonResult.success(jobService.overview());
     }
 
     @GetMapping("/templates")
-    @PreAuthorize("@ss.hasPermission('monitor:job:list')")
+    @RequirePermission("monitor:job:list")
     @Operation(summary = "内置任务模板")
     public CommonResult<List<JobTemplateVO>> templates() {
         return CommonResult.success(jobService.templates());
     }
 
     @GetMapping("/checkCron")
-    @PreAuthorize("@ss.hasPermission('monitor:job:list')")
+    @RequirePermission("monitor:job:list")
     @Operation(summary = "校验 Cron 并预览下次执行时间")
     public CommonResult<Map<String, Object>> checkCron(@RequestParam String cronExpression) {
         return CommonResult.success(jobService.checkCron(cronExpression));
     }
 
     @GetMapping("/page")
-    @PreAuthorize("@ss.hasPermission('monitor:job:list')")
+    @RequirePermission("monitor:job:list")
     @Operation(summary = "分页查询定时任务")
     public CommonResult<PageResult<SysJobVO>> page(
             @RequestParam(defaultValue = "1") Integer pageNo,
@@ -65,14 +65,14 @@ public class SysJobController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("@ss.hasPermission('monitor:job:list')")
+    @RequirePermission("monitor:job:list")
     @Operation(summary = "任务详情")
     public CommonResult<SysJobDO> detail(@PathVariable Long id) {
         return CommonResult.success(jobService.getById(id));
     }
 
     @PostMapping
-    @PreAuthorize("@ss.hasPermission('monitor:job:add')")
+    @RequirePermission("monitor:job:add")
     @Log(title = "定时任务", businessType = Log.BusinessType.INSERT)
     @Operation(summary = "新增任务")
     public CommonResult<Boolean> create(@RequestBody SysJobDO job) {
@@ -81,7 +81,7 @@ public class SysJobController {
     }
 
     @PutMapping
-    @PreAuthorize("@ss.hasPermission('monitor:job:edit')")
+    @RequirePermission("monitor:job:edit")
     @Log(title = "定时任务", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "更新任务")
     public CommonResult<Boolean> update(@RequestBody SysJobDO job) {
@@ -90,7 +90,7 @@ public class SysJobController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("@ss.hasPermission('monitor:job:delete')")
+    @RequirePermission("monitor:job:delete")
     @Log(title = "定时任务", businessType = Log.BusinessType.DELETE)
     @Operation(summary = "删除任务")
     public CommonResult<Boolean> delete(@PathVariable Long id) {
@@ -99,7 +99,7 @@ public class SysJobController {
     }
 
     @PutMapping("/changeStatus")
-    @PreAuthorize("@ss.hasPermission('monitor:job:edit')")
+    @RequirePermission("monitor:job:edit")
     @Log(title = "定时任务", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "修改任务状态")
     public CommonResult<Boolean> changeStatus(@RequestBody StatusRequest request) {
@@ -108,7 +108,7 @@ public class SysJobController {
     }
 
     @PostMapping("/run/{id}")
-    @PreAuthorize("@ss.hasPermission('monitor:job:edit')")
+    @RequirePermission("monitor:job:edit")
     @Operation(summary = "立即执行")
     public CommonResult<Boolean> run(@PathVariable Long id) {
         jobService.run(id);
@@ -116,14 +116,14 @@ public class SysJobController {
     }
 
     @GetMapping("/log/statistics")
-    @PreAuthorize("@ss.hasPermission('monitor:job:list')")
+    @RequirePermission("monitor:job:list")
     @Operation(summary = "调度统计")
     public CommonResult<Map<String, Object>> logStatistics() {
         return CommonResult.success(jobLogService.statistics());
     }
 
     @GetMapping("/log/page")
-    @PreAuthorize("@ss.hasPermission('monitor:job:list')")
+    @RequirePermission("monitor:job:list")
     @Operation(summary = "调度日志分页")
     public CommonResult<PageResult<SysJobLogDO>> logPage(
             @RequestParam(defaultValue = "1") Integer pageNo,
@@ -135,7 +135,7 @@ public class SysJobController {
     }
 
     @DeleteMapping("/log/clean")
-    @PreAuthorize("@ss.hasPermission('monitor:job:delete')")
+    @RequirePermission("monitor:job:delete")
     @Log(title = "定时任务", businessType = Log.BusinessType.DELETE)
     @Operation(summary = "清空调度日志至回收站（可按任务筛选；无参数时清空全部）")
     public CommonResult<Boolean> cleanLog(
@@ -150,7 +150,7 @@ public class SysJobController {
     }
 
     @GetMapping("/log/recycle/page")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     @Operation(summary = "调度日志回收站分页")
     public CommonResult<PageResult<SysJobLogDO>> logRecyclePage(
             PageParam pageParam,
@@ -160,7 +160,7 @@ public class SysJobController {
     }
 
     @PutMapping("/log/restore")
-    @PreAuthorize("@ss.hasRecycleRestore('monitor:job:delete')")
+    @RequirePermission(value = "monitor:job:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     @Log(title = "定时任务", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "恢复调度日志")
     public CommonResult<Boolean> restoreLog(@RequestParam Long id) {
@@ -169,7 +169,7 @@ public class SysJobController {
     }
 
     @DeleteMapping("/log/delete-permanent")
-    @PreAuthorize("@ss.hasRecycleDelete('monitor:job:delete')")
+    @RequirePermission(value = "monitor:job:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     @Log(title = "定时任务", businessType = Log.BusinessType.DELETE)
     @Operation(summary = "彻底删除调度日志")
     public CommonResult<Boolean> deleteLogPermanent(@RequestParam Long id) {
@@ -178,7 +178,7 @@ public class SysJobController {
     }
 
     @GetMapping("/recycle/page")
-    @PreAuthorize("@ss.hasRecycleRead()")
+    @RequirePermission(type = RequirePermission.Type.RECYCLE_READ)
     @Operation(summary = "定时任务回收站分页")
     public CommonResult<PageResult<SysJobDO>> recyclePage(
             PageParam pageParam,
@@ -188,7 +188,7 @@ public class SysJobController {
     }
 
     @PutMapping("/restore")
-    @PreAuthorize("@ss.hasRecycleRestore('monitor:job:delete')")
+    @RequirePermission(value = "monitor:job:delete", type = RequirePermission.Type.RECYCLE_RESTORE)
     @Log(title = "定时任务", businessType = Log.BusinessType.UPDATE)
     @Operation(summary = "恢复定时任务")
     public CommonResult<Boolean> restore(@RequestParam Long id) {
@@ -197,7 +197,7 @@ public class SysJobController {
     }
 
     @DeleteMapping("/delete-permanent")
-    @PreAuthorize("@ss.hasRecycleDelete('monitor:job:delete')")
+    @RequirePermission(value = "monitor:job:delete", type = RequirePermission.Type.RECYCLE_DELETE)
     @Log(title = "定时任务", businessType = Log.BusinessType.DELETE)
     @Operation(summary = "彻底删除定时任务")
     public CommonResult<Boolean> deletePermanent(@RequestParam Long id) {

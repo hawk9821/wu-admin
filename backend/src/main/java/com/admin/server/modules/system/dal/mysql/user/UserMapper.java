@@ -30,6 +30,16 @@ public interface UserMapper extends BaseMapper<UserDO> {
             "<if test='deptId != null'>",
             "  AND dept_id = #{deptId}",
             "</if>",
+            "<if test='deptIds != null'>",
+            "  <choose>",
+            "    <when test='deptIds.size() > 0'>",
+            "      AND dept_id IN",
+            "      <foreach collection='deptIds' item='visibleDeptId' open='(' separator=',' close=')'>#{visibleDeptId}</foreach>",
+            "    </when>",
+            "    <otherwise>AND 1 = 0</otherwise>",
+            "  </choose>",
+            "</if>",
+            "<if test='selfUsername != null'>AND username = #{selfUsername}</if>",
             "ORDER BY update_time DESC",
             "</script>"
     })
@@ -37,7 +47,12 @@ public interface UserMapper extends BaseMapper<UserDO> {
                                     @Param("username") String username,
                                     @Param("mobile") String mobile,
                                     @Param("status") Integer status,
-                                    @Param("deptId") Long deptId);
+                                    @Param("deptId") Long deptId,
+                                    @Param("deptIds") List<Long> deptIds,
+                                    @Param("selfUsername") String selfUsername);
+
+    @Select("SELECT * FROM sys_user WHERE id = #{id} AND deleted = 1")
+    UserDO selectDeletedById(@Param("id") Long id);
 
     @Update("UPDATE sys_user SET deleted = 0, update_time = NOW() WHERE id = #{id} AND deleted = 1")
     int restoreById(@Param("id") Long id);

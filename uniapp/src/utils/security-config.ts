@@ -14,6 +14,10 @@ export interface ClientSecurityConfig {
   /** 是否启用接口 HMAC-SM3 签名（sm2SignEnabled 为历史开关名，实际控制 HMAC-SM3） */
   sm2SignEnabled?: boolean
   sm3SignEnabled?: boolean
+  /** 是否启用登录/注册等高敏感场景 SM2 非对称加密传输口令 */
+  sm2EncryptEnabled?: boolean
+  /** 后端下发的系统 SM2 公钥（Hex 格式） */
+  sm2PublicKey?: string
   /** SM4 对称密钥（16 字节），由 session-sign-init 下发，仅存内存 */
   sm4Key?: string
   /** HMAC-SM3 签名 Key，由 session-sign-init 下发，仅存内存 */
@@ -91,12 +95,18 @@ export function clearSignKeys(): void {
     sm4EncryptEnabled: securityConfig.sm4EncryptEnabled,
     sm3SignEnabled: securityConfig.sm3SignEnabled,
     sm2SignEnabled: securityConfig.sm2SignEnabled,
+    sm2EncryptEnabled: securityConfig.sm2EncryptEnabled,
+    sm2PublicKey: securityConfig.sm2PublicKey,
   }
   // 同时清空 Promise 缓存，确保下次调用可重新获取新密钥
   sessionSignPromise = null
+  sessionSignRetryAfter = 0
 }
 
 let sessionSignPromise: Promise<any> | null = null
+/** 初始化失败后的冷却截止时间：未登录/缺人机凭证时避免每个请求都打一次 session-sign-init */
+let sessionSignRetryAfter = 0
+const SESSION_SIGN_FAIL_BACKOFF_MS = 30_000
 
 /**
  * 请求初始化会话签名密钥。
@@ -105,6 +115,7 @@ let sessionSignPromise: Promise<any> | null = null
  * - 成功后不清空 sessionSignPromise，保持为已 resolved 的 Promise 缓存。
  * - 后续调用直接返回缓存，不会重复发 session-sign-init，不会覆盖 Redis 里的密钥。
  * - 失败时清空 Promise，允许下次重试。
+ * - 失败后进入 30 秒冷却，避免未登录或缺人机凭证时刷屏请求。
  * - resetSecurityConfig（登出）时一并清空，保证下次登录重新初始化。
  */
 export function requestSessionSignKey(httpInstance: any): Promise<any> {
@@ -112,6 +123,11 @@ export function requestSessionSignKey(httpInstance: any): Promise<any> {
   const existing = securityConfig
   if (existing.sm3SignKey || existing.sm4Key) {
     return sessionSignPromise ?? Promise.resolve(null)
+  }
+
+  // 失败冷却期内直接拒绝，避免未登录或缺少人机凭证时刷屏式请求
+  if (Date.now() < sessionSignRetryAfter) {
+    return Promise.reject(new Error('会话密钥初始化失败，请稍后重试'))
   }
 
   // Promise 锁：正在请求中，复用同一个 Promise，防止并发多次
@@ -122,7 +138,9 @@ export function requestSessionSignKey(httpInstance: any): Promise<any> {
   sessionSignPromise = (async () => {
     try {
       const res = (await httpInstance.post('/auth/session-sign-init', undefined, {
-        params: { clientId: getClientId() }
+        params: { clientId: getClientId() },
+        // 该接口的职责就是更换会话密钥，跳过旧密钥加密，避免与服务端新下发的密钥产生时序竞争
+        skipEncrypt: true,
       })) as any
       const payload = res?.data ?? res
       if (payload?.enabled) {
@@ -132,11 +150,13 @@ export function requestSessionSignKey(httpInstance: any): Promise<any> {
         })
         startHeartbeatTimer(httpInstance)
       }
+      sessionSignRetryAfter = 0
       // 成功后不清空 Promise，保持为已 resolved 的缓存，防止后续调用重复发请求
       return res
     } catch (err) {
-      // 失败时清空 Promise，允许下次重试
+      // 失败时清空 Promise，允许冷却期后重试
       sessionSignPromise = null
+      sessionSignRetryAfter = Date.now() + SESSION_SIGN_FAIL_BACKOFF_MS
       stopHeartbeatTimer()
       throw err
     }

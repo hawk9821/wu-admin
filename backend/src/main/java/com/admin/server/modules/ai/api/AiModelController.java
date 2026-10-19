@@ -1,5 +1,6 @@
 package com.admin.server.modules.ai.api;
 
+import com.admin.server.framework.security.api.RequirePermission;
 import com.admin.server.common.core.CommonResult;
 import com.admin.server.common.core.PageResult;
 import com.admin.server.framework.log.annotation.Log;
@@ -10,7 +11,6 @@ import com.admin.server.modules.ai.api.vo.AiModelTestReqVO;
 import com.admin.server.modules.ai.service.AiModelService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.annotation.Resource;
@@ -25,21 +25,21 @@ public class AiModelController {
 
     @GetMapping("/page")
     @Operation(summary = "模型配置分页")
-    @PreAuthorize("@ss.hasRead('system:ai-model:list')")
+    @RequirePermission(value = "system:ai-model:list", type = RequirePermission.Type.READ)
     public CommonResult<PageResult<AiModelRespVO>> page(AiModelPageReqVO reqVO) {
         return CommonResult.success(aiModelService.page(reqVO));
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "模型配置详情")
-    @PreAuthorize("@ss.hasRead('system:ai-model:query')")
+    @RequirePermission(value = "system:ai-model:query", type = RequirePermission.Type.READ)
     public CommonResult<AiModelRespVO> detail(@PathVariable Long id) {
         return CommonResult.success(aiModelService.detail(id));
     }
 
     @PostMapping
     @Operation(summary = "新增模型配置")
-    @PreAuthorize("@ss.hasPermission('system:ai-model:create')")
+    @RequirePermission("system:ai-model:create")
     @Log(title = "AI模型配置", businessType = Log.BusinessType.INSERT)
     public CommonResult<Boolean> create(@RequestBody AiModelSaveReqVO reqVO) {
         aiModelService.create(reqVO);
@@ -48,7 +48,7 @@ public class AiModelController {
 
     @PutMapping
     @Operation(summary = "修改模型配置")
-    @PreAuthorize("@ss.hasPermission('system:ai-model:update')")
+    @RequirePermission("system:ai-model:update")
     @Log(title = "AI模型配置", businessType = Log.BusinessType.UPDATE)
     public CommonResult<Boolean> update(@RequestBody AiModelSaveReqVO reqVO) {
         aiModelService.update(reqVO);
@@ -57,7 +57,7 @@ public class AiModelController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除模型配置")
-    @PreAuthorize("@ss.hasPermission('system:ai-model:delete')")
+    @RequirePermission("system:ai-model:delete")
     @Log(title = "AI模型配置", businessType = Log.BusinessType.DELETE)
     public CommonResult<Boolean> delete(@PathVariable Long id) {
         aiModelService.delete(id);
@@ -66,7 +66,7 @@ public class AiModelController {
 
     @PutMapping("/{id}/default")
     @Operation(summary = "设为默认模型")
-    @PreAuthorize("@ss.hasPermission('system:ai-model:update')")
+    @RequirePermission("system:ai-model:update")
     @Log(title = "AI模型配置", businessType = Log.BusinessType.UPDATE)
     public CommonResult<Boolean> setDefault(@PathVariable Long id) {
         aiModelService.setDefault(id);
@@ -75,7 +75,7 @@ public class AiModelController {
 
     @PostMapping("/test")
     @Operation(summary = "连通性测试，返回延迟毫秒数")
-    @PreAuthorize("@ss.hasPermission('system:ai-model:test')")
+    @RequirePermission("system:ai-model:test")
     public CommonResult<Long> test(@RequestBody AiModelTestReqVO reqVO) {
         return CommonResult.success(aiModelService.test(reqVO));
     }

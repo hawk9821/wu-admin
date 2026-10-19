@@ -18,6 +18,7 @@ import com.admin.server.modules.system.service.permission.PermissionService;
 import com.admin.server.testsupport.MybatisLambdaTestBase;
 import com.admin.server.testsupport.MybatisMockMatchers;
 import com.admin.server.testsupport.ServiceTestFixtures;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -64,6 +65,14 @@ class ProfileServiceImplTest extends MybatisLambdaTestBase {
 
     @InjectMocks
     private ProfileServiceImpl profileService;
+
+    @BeforeEach
+    void stubPasswordDecryption() {
+        // 未加密口令原样返回；SM2 密文场景由 AuthServiceImpl 测试覆盖。
+        // 多数用例不会走到解密分支，使用 lenient 避免严格模式判定为多余桩。
+        lenient().when(systemConfigHelper.decryptPasswordIfEncrypted(anyString()))
+                .thenAnswer(inv -> inv.getArgument(0));
+    }
 
     @Test
     @DisplayName("getProfile：用户不存在抛 404")
