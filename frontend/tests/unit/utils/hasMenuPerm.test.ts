@@ -14,6 +14,25 @@ const menus = [
   },
 ]
 
+/** 按钮级节点（type=3）不应被当作页面访问权限 */
+const menusWithButton = [
+  {
+    type: 2,
+    permission: 'system:config:list',
+    children: [],
+  },
+  {
+    type: 3,
+    permission: 'system:config:edit',
+    children: [],
+  },
+  {
+    type: 3,
+    permission: 'system:approval:list',
+    children: [],
+  },
+]
+
 describe('hasMenuPerm', () => {
   it('returns false for empty menus', () => {
     expect(hasMenuPerm(undefined, 'system:user:list')).toBe(false)
@@ -30,6 +49,19 @@ describe('hasMenuPerm', () => {
 
   it('returns false when permission not found', () => {
     expect(hasMenuPerm(menus, 'system:dept:list')).toBe(false)
+  })
+
+  it('ignores button-level (type=3) nodes for page-level permission', () => {
+    // 仅存在按钮级节点时，不作为页面访问权限（快捷入口越权根因）
+    expect(hasMenuPerm(menusWithButton, 'system:approval:list')).toBe(false)
+  })
+
+  it('still matches page-level (type=2) nodes', () => {
+    expect(hasMenuPerm(menusWithButton, 'system:config:list')).toBe(true)
+  })
+
+  it('keeps matching nodes without type field for backward compatibility', () => {
+    expect(hasMenuPerm(menus, 'system:user:create')).toBe(true)
   })
 })
 

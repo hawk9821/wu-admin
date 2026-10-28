@@ -3,15 +3,27 @@ import type { MenuTreeNode } from '@/types/api'
 
 export type PermissionValue = string | string[]
 
+export interface CheckMenuOptions {
+  /** 是否排除按钮级节点（type=3）。页面访问级权限判断应传 true，按钮/接口级判断保持默认 false。 */
+  excludeButton?: boolean
+}
+
 /**
  * 递归检查菜单树中是否存在目标权限标识
+ * @param options.excludeButton 为 true 时跳过 type===3 的按钮节点，仅命中目录(type=1)/页面(type=2)级节点，
+ *   用于页面访问权限判断，避免按钮权限被误当作页面访问权限（快捷入口越权根因）。
  */
-export function checkPermissionFromMenus(menus: MenuTreeNode[] | undefined, permission: string): boolean {
+export function checkPermissionFromMenus(
+  menus: MenuTreeNode[] | undefined,
+  permission: string,
+  options?: CheckMenuOptions,
+): boolean {
   if (!menus?.length) return false
 
   for (const menu of menus) {
+    if (options?.excludeButton && menu.type === 3) continue
     if (menu.permission === permission) return true
-    if (menu.children?.length && checkPermissionFromMenus(menu.children as MenuTreeNode[], permission)) {
+    if (menu.children?.length && checkPermissionFromMenus(menu.children as MenuTreeNode[], permission, options)) {
       return true
     }
   }
@@ -44,12 +56,13 @@ export function hasPermission(permission: PermissionValue): boolean {
 }
 
 /**
- * 从菜单树中判断是否拥有某权限标识
- * 说明：后端下发的 userStore.menus 仅包含目录与页面（已过滤 type=3 按钮），
- * 若菜单树未命中，会自动回退检查 userStore.userInfo.permissions 或超级管理员角色，避免按钮权限被误判为无权限。
+ * 从菜单树中判断是否拥有某权限标识（页面访问级）
+ * 说明：后端下发的 userStore.menus 同时包含目录/页面与按钮(type=3)节点，
+ * 页面访问权限判断会排除 type=3 按钮节点，避免按钮权限被误当作页面访问权限。
+ * 若页面级菜单未命中，会自动回退检查 userStore.userInfo.permissions 或超级管理员角色。
  */
 export function hasMenuPermission(menus: MenuTreeNode[] | undefined, permission: string): boolean {
-  if (checkPermissionFromMenus(menus, permission)) {
+  if (checkPermissionFromMenus(menus, permission, { excludeButton: true })) {
     return true
   }
   const userStore = useUserStore()
@@ -61,13 +74,15 @@ export function hasMenuPermission(menus: MenuTreeNode[] | undefined, permission:
   return codes.includes('*:*:*') || codes.includes(permission)
 }
 
-/** 兼容简写：从侧栏菜单树判断是否具有某 permission（与后端 @PreAuthorize 标识一致） */
+/** 兼容简写：从侧栏菜单树判断页面级权限（与后端 @PreAuthorize 标识一致）。
+ *  跳过 type=3 按钮节点，仅命中目录/页面级，确保按钮权限不会被误判为页面访问权限。 */
 export function hasMenuPerm(
-  menus: { permission?: string; children?: unknown[] }[] | undefined,
+  menus: { permission?: string; children?: unknown[]; type?: number }[] | undefined,
   perm: string,
 ): boolean {
   if (!menus?.length) return false
   for (const menu of menus) {
+    if (menu.type === 3) continue
     if (menu.permission === perm) return true
     if (menu.children?.length && hasMenuPerm(menu.children as typeof menus, perm)) return true
   }
@@ -76,7 +91,7 @@ export function hasMenuPerm(
 
 export function hasMonitorPerm(
   permissions: string[] | undefined,
-  menus: { permission?: string; children?: unknown[] }[] | undefined,
+  menus: { permission?: string; children?: unknown[]; type?: number }[] | undefined,
   perm: string,
 ): boolean {
   return (permissions || []).includes(perm) || hasMenuPerm(menus, perm)
@@ -89,7 +104,7 @@ export function hasMonitorPerm(
  */
 export function hasChatPerm(
   _permissions: string[] | undefined,
-  menus: { permission?: string; children?: unknown[] }[] | undefined,
+  menus: { permission?: string; children?: unknown[]; type?: number }[] | undefined,
 ): boolean {
   return hasMenuPerm(menus, 'system:chat:list') || hasMenuPerm(menus, 'system:chat:query')
 }
