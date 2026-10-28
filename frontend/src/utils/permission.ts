@@ -74,6 +74,25 @@ export function hasMenuPermission(menus: MenuTreeNode[] | undefined, permission:
   return codes.includes('*:*:*') || codes.includes(permission)
 }
 
+/**
+ * 页面访问级可达性判断（供路由守卫使用）
+ * - 管理员（admin / super_admin）或全局通配符 '*:*:*' 拥有全部页面权限；
+ * - 其余仅以「用户页面级菜单树」为准（排除 type=3 按钮节点），
+ *   不回退 user.permissions 的具体按钮权限码，避免按钮码被当作页面访问权限导致越权。
+ */
+export function hasPageAccessByUser(
+  menus: MenuTreeNode[] | undefined,
+  permission: string,
+  user?: { roles?: string[]; permissions?: string[] },
+): boolean {
+  const roles = user?.roles || []
+  const codes = user?.permissions || []
+  if (roles.includes('admin') || roles.includes('super_admin') || codes.includes('*:*:*')) {
+    return true
+  }
+  return checkPermissionFromMenus(menus, permission, { excludeButton: true })
+}
+
 /** 兼容简写：从侧栏菜单树判断页面级权限（与后端 @PreAuthorize 标识一致）。
  *  跳过 type=3 按钮节点，仅命中目录/页面级，确保按钮权限不会被误判为页面访问权限。 */
 export function hasMenuPerm(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { hasMenuPerm, hasMonitorPerm, hasChatPerm } from '@/utils/hasMenuPerm'
+import { hasPageAccessByUser } from '@/utils/permission'
 
 const menus = [
   {
@@ -17,19 +18,22 @@ const menus = [
 /** 按钮级节点（type=3）不应被当作页面访问权限 */
 const menusWithButton = [
   {
+    id: 1,
+    name: '配置',
     type: 2,
     permission: 'system:config:list',
-    children: [],
   },
   {
+    id: 2,
+    name: '配置编辑',
     type: 3,
     permission: 'system:config:edit',
-    children: [],
   },
   {
+    id: 3,
+    name: '审批按钮',
     type: 3,
     permission: 'system:approval:list',
-    children: [],
   },
 ]
 
@@ -89,5 +93,30 @@ describe('hasChatPerm', () => {
   it('returns false when chat menu is absent', () => {
     expect(hasChatPerm(['system:chat:query'], [])).toBe(false)
     expect(hasChatPerm(['system:user:list'], menus)).toBe(false)
+  })
+})
+
+describe('hasPageAccessByUser（路由守卫页面可达性）', () => {
+  it('denies access when page menu absent even if button permission code present', () => {
+    // 用户权限码数组里含该按钮码，但页面级菜单无对应页面 → 不得放行（越权根因）
+    const user = { roles: [], permissions: ['system:user:list'] }
+    expect(hasPageAccessByUser(menusWithButton, 'system:approval:list', user)).toBe(false)
+  })
+
+  it('allows access when page-level menu matches', () => {
+    expect(hasPageAccessByUser(menusWithButton, 'system:config:list', { roles: [], permissions: [] })).toBe(true)
+  })
+
+  it('allows access for admin / super_admin roles', () => {
+    expect(hasPageAccessByUser([], 'system:user:list', { roles: ['admin'], permissions: [] })).toBe(true)
+    expect(hasPageAccessByUser([], 'system:user:list', { roles: ['super_admin'], permissions: [] })).toBe(true)
+  })
+
+  it('allows access for global wildcard permission', () => {
+    expect(hasPageAccessByUser([], 'system:user:list', { roles: [], permissions: ['*:*:*'] })).toBe(true)
+  })
+
+  it('denies access for plain user without matching page menu', () => {
+    expect(hasPageAccessByUser([], 'system:user:list', { roles: [], permissions: [] })).toBe(false)
   })
 })

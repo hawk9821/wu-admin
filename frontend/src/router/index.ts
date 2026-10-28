@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { useSiteStore } from '@/store/site'
-import { hasMenuPermission } from '@/utils/permission'
+import { hasPageAccessByUser } from '@/utils/permission'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -221,12 +221,16 @@ const router = createRouter({
   routes
 })
 
-/** 路由页访问仅以启用菜单树为准，避免 permissions 别名导致停用菜单仍可直链进入 */
+/**
+ * 路由页面可达性判定（页面访问级）
+ * 仅以用户页面级菜单树为准；管理员/通配符拥有全部权限；
+ * 不使用 userInfo.permissions 按钮权限码回退，避免「仅有按钮码、无对应页面菜单」被放行进无权限模块页面。
+ */
 function hasRoutePermission(userStore: ReturnType<typeof useUserStore>, required?: unknown): boolean {
   if (!required) return true
   const requiredPerm = String(required)
   if (!requiredPerm) return true
-  return hasMenuPermission(userStore.menus || [], requiredPerm)
+  return hasPageAccessByUser(userStore.menus || [], requiredPerm, userStore.userInfo)
 }
 
 router.beforeEach(async (to, _from, next) => {
